@@ -16,3 +16,4 @@
 14. Chart chrome and axis ticks follow `docs/design.md`; byte scales are `ChartRenderer.ByteAxisMax` (power of two, floor 4).
 15. Sampler state the render thread reads is copied out under a lock (`GpuSampler.EngineSnapshot`); never enumerate a list the sampling thread rebuilds.
 16. Persist geometry on move/resize, not only on apply: `FlushPendingGeometry` saves, so a drag survives a restart without the checkmark.
+17. Popups (colour picker) paint through `ColorPickerLayout` + `SystemTheme`; ring/disc are CPU bitmaps drawn 1:1 with `DrawBitmap` (a bitmap brush re-maps DPI and smears).

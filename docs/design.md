@@ -60,3 +60,15 @@ to a box would leave the glyph visibly short of the line it is meant to sit on.
 11. The label column is sized from the labels themselves and never moves
     between locked and edit mode; the bottom-left corner bracket yields to it
     instead, so a bracket arm can never cross a tick.
+
+## Colour
+
+17. The edit-mode colour chip is a filled circle in the free zone between the X badge and
+    the centred group, GapChrome clear of the X ink. It is dropped when the card is too
+    narrow to hold it, so the group never moves.
+18. The picker follows the system theme, never a hardcoded white: card #424242 in dark mode,
+    #CCCCCC in light mode (`SystemTheme.Card`, read from AppsUseLightTheme). Ink, hairlines
+    and pills come from the same palette.
+19. Paint and hit-test share `ColorPickerLayout`; the ring runs red at 3 o'clock
+    clockwise (red, magenta, blue, cyan, green, yellow) and the disc is white at the top,
+    hue at the rim, black at the bottom.

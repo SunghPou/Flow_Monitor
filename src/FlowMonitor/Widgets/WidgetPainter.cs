@@ -155,6 +155,27 @@ public static class WidgetPainter
     }
 
     /// <summary>
+    /// Edit-mode colour chip: a filled circle in the widget's line colour, ringed so a
+    /// light hue still reads against the card. Opens the picker; edit mode only.
+    /// </summary>
+    public static void PaintColorChip(ID2D1DeviceContext dc, ResourceCache res, WidgetConfig cfg,
+        float width, float height, float amount, System.Drawing.RectangleF boxLogical, Color4 color)
+    {
+        if (amount <= 0.01f || boxLogical.Width <= 0) return;
+        float s = cfg.Dpi;
+        float ease = Ease(amount);
+        float r = boxLogical.Width * 0.5f * s * (0.82f + 0.18f * ease);
+        var c = new V2((boxLogical.Left + boxLogical.Width * 0.5f) * s,
+                       (boxLogical.Top + boxLogical.Height * 0.5f) * s);
+        var fill = new Color4(color.R, color.G, color.B, 0.35f + 0.65f * ease);
+        var ring = res.Brush(new Color4(1f, 1f, 1f, 0.30f + 0.40f * ease));
+        dc.PushAxisAlignedClip(new RectF(0, 0, width, height), AntialiasMode.Aliased);
+        dc.FillEllipse(new Ellipse(c, r, r), res.Brush(fill));
+        dc.DrawEllipse(new Ellipse(c, r, r), ring, Math.Max(1f, 1.1f * s), res.RoundStroke);
+        dc.PopAxisAlignedClip();
+    }
+
+    /// <summary>
     /// Edit-mode corner brackets. <paramref name="skipBottomLeft"/> hands the bottom-left
     /// corner to the chart's axis-label column, which sits at the card inset and must not
     /// move between locked and edit mode (docs/design.md).

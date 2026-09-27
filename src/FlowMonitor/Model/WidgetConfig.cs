@@ -146,4 +146,26 @@ public static class WidgetConfigColors
         GraphKind.Fans => c.LineColorFans,
         _ => c.AccentHex,
     };
+
+    /// <summary>
+    /// Writes the picker hex back onto the per-kind slot, normalised to #RRGGBB so
+    /// LineColorFor and LineColorFor(kind) can never disagree.
+    /// </summary>
+    public static void SetLineColor(this WidgetConfig c, GraphKind kind, string hex)
+    {
+        var rgb = Widgets.Rgba.FromHex(hex).ToHex();
+        switch (kind)
+        {
+            case GraphKind.Cpu:
+            case GraphKind.CpuCores: c.LineColorCpu = rgb; break;
+            case GraphKind.Memory: c.LineColorMemory = rgb; break;
+            case GraphKind.Disk: c.LineColorDisk = rgb; break;
+            case GraphKind.Network: c.LineColorNetwork = rgb; break;
+            case GraphKind.Gpu:
+            case GraphKind.GpuCores:
+            case GraphKind.Vram: c.LineColorGpu = rgb; break;
+            case GraphKind.Fans: c.LineColorFans = rgb; break;
+            default: c.AccentHex = rgb; break;
+        }
+    }
 }

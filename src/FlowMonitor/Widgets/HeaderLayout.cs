@@ -10,7 +10,7 @@ namespace FlowMonitor.Widgets;
 /// neighbour's gap, because only ink is seen.
 /// </summary>
 public readonly record struct HeaderLayout(RectF Value, RectF Title, RectF Prev, RectF Next,
-    RectF Close, RectF Check, float ValueMax)
+    RectF Close, RectF Check, RectF Chip, float ValueMax)
 {
     public const float Inset = 12f;       // card edge to ink (locked row)
     public const float GapText = 8f;      // min ink gap, text to text
@@ -24,6 +24,7 @@ public readonly record struct HeaderLayout(RectF Value, RectF Title, RectF Prev,
     // and are asserted not to collide with the glyph, so the floor needs no bracket
     // arithmetic (docs/design.md header rule 5).
     public const float MinInkLeft = Inset;
+    public const float ChipDia = 16f;      // colour chip swatch (edit mode only)
     public const float ChevBox = 26f;     // metric chevron hit box (square)
     public const float ChevGap = 8f;      // chevron hit box to title ink
     public const float RowCenter = 19f;   // the one optical center of the row
@@ -108,6 +109,15 @@ public readonly record struct HeaderLayout(RectF Value, RectF Title, RectF Prev,
             prev = ChevHitBox(tx - ChevGap - WidgetPainter.ChevronGlyphHalf, leftReserve, valueLeft);
             next = ChevHitBox(tx + titleW2 + ChevGap + WidgetPainter.ChevronGlyphHalf, leftReserve, valueLeft);
         }
-        return new HeaderLayout(value, title, prev, next, close, check, valueMax);
+        // The colour chip opens the picker. It sits in the free zone just right of the X,
+        // so the header reads as one left cluster and the chip never drifts with card width.
+        RectF chip = RectF.Empty;
+        if (editing)
+        {
+            float groupInkLeft = tx - inkPad;
+            if (leftReserve + ChipDia + GapText <= groupInkLeft)
+                chip = new RectF(leftReserve, RowCenter - ChipDia / 2f, ChipDia, ChipDia);
+        }
+        return new HeaderLayout(value, title, prev, next, close, check, chip, valueMax);
     }
 }

@@ -29,8 +29,8 @@ public sealed class WidgetWindow
 
     // interaction state (UI thread only)
     bool _dragging, _resizing, _hover;
-    bool _checkHoverTarget, _closeHoverTarget;
-    float _checkHover, _closeHover;
+    bool _checkHoverTarget, _closeHoverTarget, _chipHoverTarget;
+    float _checkHover, _closeHover, _chipHover;
     ResizeEdge _edge;
     POINT _dragOrigin;
     RECT _dragStartRect;
@@ -308,9 +308,10 @@ public sealed class WidgetWindow
         if (!_hover) { _hover = true; RequestRedraw(); }
         bool ck = _editing && IsInCheckMark(x, y);
         bool cl = _editing && IsInCloseButton(x, y);
-        if (ck != _checkHoverTarget || cl != _closeHoverTarget)
+        bool ch = _editing && IsInColorChip(x, y);
+        if (ck != _checkHoverTarget || cl != _closeHoverTarget || ch != _chipHoverTarget)
         {
-            _checkHoverTarget = ck; _closeHoverTarget = cl;
+            _checkHoverTarget = ck; _closeHoverTarget = cl; _chipHoverTarget = ch;
             RequestRedraw();
         }
         if (_dragging) OnDragMove(x, y);
@@ -321,7 +322,7 @@ public sealed class WidgetWindow
     public void OnMouseLeave()
     {
         if (_hover) { _hover = false; RequestRedraw(); }
-        if (_checkHoverTarget || _closeHoverTarget)
+        if (_checkHoverTarget || _closeHoverTarget || _chipHoverTarget)
         {
             _checkHoverTarget = _closeHoverTarget = false;
             RequestRedraw();
@@ -350,6 +351,12 @@ public sealed class WidgetWindow
         if (IsInCheckMark(x, y))
         {
             EndEdit();
+            return;
+        }
+
+        if (IsInColorChip(x, y))
+        {
+            OpenColorPicker();
             return;
         }
 
@@ -482,11 +489,40 @@ public sealed class WidgetWindow
     }
 
     // Last painted chevron and badge boxes in logical px; paint and hit-test share HeaderLayout.
-    System.Drawing.RectangleF _prevMetricRect, _nextMetricRect, _closeRect, _checkRect;
+    System.Drawing.RectangleF _prevMetricRect, _nextMetricRect, _closeRect, _checkRect, _chipRect;
 
     /// <summary>Badge rects from the last painted frame (HeaderLayout).</summary>
     internal System.Drawing.RectangleF CloseBadgeRect => _closeRect;
     internal System.Drawing.RectangleF CheckBadgeRect => _checkRect;
+    internal System.Drawing.RectangleF ColorChipRect => _chipRect;
+
+    /// Opens the modal picker under the chip and commits the colour on accept.
+    void OpenColorPicker()
+    {
+        float d = Config.Dpi;
+        var r = _chipRect;
+        GetClientRect(Handle, out var client);
+        int sx = (int)(r.Left * d) - (int)(r.Width * d * 0.5f);
+        int sy = (int)((r.Top + r.Height) * d) + 8;
+        var screen = new Native.POINT(sx, sy);
+        ClientToScreen(Handle, ref screen);
+        string? picked = ColorPickerWindow.Show(_host, this, screen.X, screen.Y, Config.LineColorFor(Config.Graph));
+        if (picked == null) return;
+        Config.SetLineColor(Config.Graph, picked);
+        _host.OnWidgetConfigChanged(this, livePreview: false);
+    }
+
+    static void GetClientRect(IntPtr h, out RECT r) => Native.GetClientRect(h, out r);
+
+    static void ClientToScreen(IntPtr h, ref POINT p) => Native.ClientToScreen(h, ref p);
+
+    bool IsInColorChip(int x, int y)
+    {
+        if (!_editing || _chipRect.Width <= 0) return false;
+        var d = Config.Dpi;
+        System.Drawing.RectangleF r = _chipRect;
+        return x >= r.Left * d && x <= (r.Left + r.Width) * d && y >= r.Top * d && y <= (r.Top + r.Height) * d;
+    }
 
     bool IsInCheckMark(int x, int y)
     {
@@ -556,7 +592,7 @@ public sealed class WidgetWindow
         // IDC_ARROW, never 0 (NULL removes the cursor).
         if (!_editing) { SetCursorShape(IDC_ARROW); return; }
         // Hand cursor over badges.
-        if (IsInCloseButton(x, y) || IsInCheckMark(x, y)) { SetCursorShape(IDC_HAND); return; }
+        if (IsInCloseButton(x, y) || IsInCheckMark(x, y) || IsInColorChip(x, y)) { SetCursorShape(IDC_HAND); return; }
         if (IsInPrevMetric(x, y) || IsInNextMetric(x, y)) { SetCursorShape(IDC_HAND); return; }
         SetCursorShape(HitTestEdge(x, y) switch
         {
@@ -637,11 +673,13 @@ public sealed class WidgetWindow
         }
 
         float ease = Math.Clamp(dt * 14f, 0f, 1f);
-        float prevCheckHov = _checkHover, prevCloseHov = _closeHover;
+        float prevCheckHov = _checkHover, prevCloseHov = _closeHover, prevChipHov = _chipHover;
         _checkHover += ((_checkHoverTarget && editing ? 1f : 0f) - _checkHover) * ease;
+        _chipHover += ((_chipHoverTarget && editing ? 1f : 0f) - _chipHover) * ease;
         _closeHover += ((_closeHoverTarget && editing ? 1f : 0f) - _closeHover) * ease;
         if (Math.Abs(_checkHover - prevCheckHov) > 0.004f
-            || Math.Abs(_closeHover - prevCloseHov) > 0.004f) _redrawRequested = true;
+            || Math.Abs(_closeHover - prevCloseHov) > 0.004f
+            || Math.Abs(_chipHover - prevChipHov) > 0.004f) _redrawRequested = true;
 
         // Reset transform on edit-mode exit.
         if (_wasEditing && !editing) surface.SetTransform(Matrix3x2.Identity);
@@ -650,7 +688,8 @@ public sealed class WidgetWindow
         bool chromeAnimating = Math.Abs(prevHover - _hoverAmount) > 0.0005f
                             || Math.Abs(prevCheck - _checkAmount) > 0.0005f
                             || Math.Abs(prevCheckHov - _checkHover) > 0.0005f
-                            || Math.Abs(prevCloseHov - _closeHover) > 0.0005f;
+                            || Math.Abs(prevCloseHov - _closeHover) > 0.0005f
+                            || Math.Abs(prevChipHov - _chipHover) > 0.0005f;
 
         if (!_redrawRequested && !chromeAnimating && !_charts.FrameChanged) return false;
 
@@ -678,6 +717,7 @@ public sealed class WidgetWindow
             _nextMetricRect = layout.Next;
             _closeRect = layout.Close;
             _checkRect = layout.Check;
+            _chipRect = layout.Chip;
         }
         var dc = surface.Context;
         // Paint against surface real pixel size; _width/_height are logical units.
@@ -690,6 +730,8 @@ public sealed class WidgetWindow
         _charts.Draw(dc, Config, model, Config.Dpi * 96f, now, surface.Width, surface.Height);
         WidgetPainter.PaintCloseButton(dc, _host.Resources, Config, w, h, _closeRect, _checkAmount, _closeHover);
         WidgetPainter.PaintCheckMark(dc, _host.Resources, Config, w, h, _checkRect, _checkAmount, _checkHover);
+        WidgetPainter.PaintColorChip(dc, _host.Resources, Config, w, h, _checkAmount, _chipRect,
+            Rgba.FromHex(Config.LineColorFor(Config.Graph)).ToColor4());
         if (editing) WidgetPainter.PaintMetricArrows(dc, _host.Resources, Config, w, h, _checkAmount,
             _prevMetricRect, _nextMetricRect);
         if (editing) WidgetPainter.PaintResizeAffordance(dc, _host.Resources, Config, w, h,

@@ -72,6 +72,46 @@ public static class SelfTest
             resources = new ResourceCache(device);
             Log.Info("swap chain " + surface.Width + "x" + surface.Height + " + resource cache");
 
+            // ---- 2b. colour picker sheet (--capture only) -----------------------
+            // Rendered through the same Paint the picker window runs, once per theme.
+            // It runs here, next to the first surface: a second composition target for
+            // the hidden host hwnd is only accepted while the host is still pristine.
+            if (captureDir.Length > 0)
+            {
+                // Its own hidden host hwnd: DComp serves one composition target per hwnd,
+                // so the picker cannot share the main test surface's window.
+                IntPtr pickHwnd = CreateWindowExW(
+                    WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, SelftestClassName, "FlowMonitor PickerSheet",
+                    unchecked((uint)WS_POPUP), 0, 0,
+                    (int)ColorPickerLayout.CardW, (int)ColorPickerLayout.CardH,
+                    IntPtr.Zero, IntPtr.Zero, GetModuleHandle(null), IntPtr.Zero);
+                try
+                {
+                    if (pickHwnd == IntPtr.Zero)
+                        throw new InvalidOperationException("picker sheet hwnd: " + Marshal.GetLastWin32Error());
+                    using var pick = new WidgetSurface(device, pickHwnd,
+                        (int)ColorPickerLayout.CardW, (int)ColorPickerLayout.CardH);
+                    foreach (bool light in new[] { false, true })
+                    {
+                        SystemTheme.OverrideLight = light;
+                        // Flip model: the readback carries the last presented frame,
+                        // so paint twice before capturing.
+                        for (int f = 0; f < 2; f++)
+                            ColorPickerWindow.PaintTo(pick, resources, 1f,
+                                new Hsv(275, 0.62, 0.86), 0.8);
+                        pick.CaptureToBmp(device, System.IO.Path.Combine(captureDir,
+                            light ? "31-picker-light.bmp" : "31-picker-dark.bmp"));
+                        Log.Info($"captured picker ({(light ? "light" : "dark")} theme)");
+                    }
+                }
+                catch (Exception ex) { Log.Write("ERROR", "picker sheet: " + ex); }
+                finally
+                {
+                    SystemTheme.OverrideLight = null;
+                    if (pickHwnd != IntPtr.Zero) DestroyWindow(pickHwnd);
+                }
+            }
+
             // ---- 3. charts that hit every drawing path -------------------------
             var charts = new[]
             {
@@ -650,6 +690,75 @@ public static class SelfTest
                     $"title center {lockedC:0.0} vs card center 230.0");
             }
 
+            // ---- 3d. colour picker: model, ring order, hit-test, chip ---------
+            {
+                // Every colour we can show survives the round trip the picker uses.
+                string[] hexes = ["#4CC2FF", "#FF0000", "#00FF00", "#0000FF", "#FFFFFF",
+                                  "#000000", "#5823CD", "#4DA6FF"];
+                static string RtHex(string h)
+                {
+                    var (r, g, b) = Rgba.FromHex(h).ToHsv().ToRgb();
+                    return new Rgba(r, g, b).ToHex();
+                }
+                bool roundTrip = hexes.All(h => RtHex(h) == h);
+                Check(roundTrip, "colour survives hex -> HSV -> hex",
+                    $"{hexes.Count(h => RtHex(h) == h)}/{hexes.Length} round trips exact");
+
+                Check(Rgba.FromHex("#abc").ToHex() == "#AABBCC"
+                    && Rgba.FromHex("AABBCC").ToHex() == "#AABBCC"
+                    && Rgba.FromHex("nonsense").ToHex() == "#FFFFFF",
+                    "hex parsing takes short, bare and junk input",
+                    $"#abc -> {Rgba.FromHex("#abc").ToHex()}, bare -> {Rgba.FromHex("AABBCC").ToHex()}, junk -> {Rgba.FromHex("nonsense").ToHex()}");
+
+                // The ring must run red at 3 o'clock, then magenta, blue, cyan,
+                // green, yellow clockwise — the reference wheel's order.
+                float h3 = ColorPickerLayout.HueFromPoint(
+                    ColorPickerLayout.Center.X + 90f, ColorPickerLayout.Center.Y);
+                float h12 = ColorPickerLayout.HueFromPoint(
+                    ColorPickerLayout.Center.X, ColorPickerLayout.Center.Y - 90f);
+                float h9 = ColorPickerLayout.HueFromPoint(
+                    ColorPickerLayout.Center.X - 90f, ColorPickerLayout.Center.Y);
+                Check(Math.Abs(h3) < 0.01f && Math.Abs(h12 - 90f) < 0.01f && Math.Abs(h9 - 180f) < 0.01f,
+                    "hue ring puts red at 3 o'clock and runs the reference order",
+                    $"3 o'clock {h3:0.0} deg, 12 o'clock {h12:0.0} (yellow-green), 9 o'clock {h9:0.0} (cyan)");
+
+                float back = ColorPickerLayout.HueFromPoint(
+                    ColorPickerLayout.PointFromHue(275f).X, ColorPickerLayout.PointFromHue(275f).Y);
+                Check(Math.Abs(back - 275f) < 0.5f, "hue marker and ring are inverses",
+                    $"hue 275 -> {back:0.0} deg");
+
+                Check(ColorPickerLayout.HitTest(ColorPickerLayout.Center.X, ColorPickerLayout.Center.Y)
+                        == PickerPart.Disc
+                    && ColorPickerLayout.HitTest(ColorPickerLayout.Center.X + 90f, ColorPickerLayout.Center.Y)
+                        == PickerPart.Ring
+                    && ColorPickerLayout.HitTest(ColorPickerLayout.AlphaTrack.Left + 30f,
+                        ColorPickerLayout.AlphaTrack.Top + 8f) == PickerPart.Alpha
+                    && ColorPickerLayout.HitTest(ColorPickerLayout.Eyedropper.Left + 5f,
+                        ColorPickerLayout.Eyedropper.Top + 5f) == PickerPart.Eyedropper
+                    && ColorPickerLayout.HitTest(4f, 4f) == PickerPart.None,
+                    "hit-test agrees with what the ring, disc, slider and dropper draw",
+                    "centre = disc, ring band = ring, slider = alpha, dropper = eyedropper, corner = none");
+
+                var dark = SystemTheme.CardFor(light: false);
+                var light = SystemTheme.CardFor(light: true);
+                Check(Math.Abs(dark.R - 66 / 255f) < 0.002f && Math.Abs(light.R - 204 / 255f) < 0.002f
+                    && Math.Abs(dark.G - dark.R) < 0.002f && Math.Abs(dark.B - dark.R) < 0.002f,
+                    "picker card fill follows the system theme",
+                    $"dark #424242 -> {dark.R * 255:0} ({dark.G * 255:0},{dark.B * 255:0}), light #CCCCCC -> {light.R * 255:0}");
+
+                // The chip lives in the free zone left of the centred group and is
+                // dropped rather than allowed to push the group off centre.
+                var chipEdit = HeaderLayout.Compute(460, titleW: 45, valueW: 110, editing: true);
+                float chipClear = chipEdit.Chip.Width == 0 ? 0
+                    : chipEdit.Chip.Left - HeaderLayout.BadgeInkRight(chipEdit.Close);
+                Check(chipEdit.Chip.Width == HeaderLayout.ChipDia && chipClear >= HeaderLayout.GapChrome,
+                    "colour chip sits in the header's free zone, clear of the X",
+                    $"chip [{chipEdit.Chip.Left:0.0}..{chipEdit.Chip.Right:0.0}] {chipClear:0.0}px after the X ink");
+                var chipNarrow = HeaderLayout.Compute(150, titleW: 45, valueW: 110, editing: true);
+                Check(chipNarrow.Chip.Width == 0, "colour chip is dropped on a card too narrow to hold it",
+                    "a 150px card has no free zone, so no chip is offered");
+            }
+
             Check(surface.Width == 460 && surface.Height == 200, "chart laid out against the real target size",
                 $"surface is {surface.Width}x{surface.Height} and the chart was told the same, not the 420x180 config default");
 
@@ -1107,6 +1216,7 @@ public static class SelfTest
                                 catch (Exception ex) { Log.Write("ERROR", $"card {kind}: {ex}"); }
                                 finally { try { cw?.Destroy(); } catch { } }
                             }
+
                         }
                     }
                     catch (Exception ex)
