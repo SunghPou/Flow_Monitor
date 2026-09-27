@@ -78,12 +78,13 @@ public sealed class DiskSampler
 
     public void Update(double now)
     {
-        if (Unavailable) return;
+        if (Unavailable || _read is null || _write is null) return;
+
+        // One collection for the whole query; "% Disk Time" is rate-based and a second
+        // collection in the same tick would read it as 0.
+        Pdh.Collect(_query);
 
         // First read after Collect has no rate yet (PDH_NO_DATA); treat as "not yet".
-        _read!.Collect();
-        _write!.Collect();
-        _busy?.Collect();
 
         double r = Sum(_read, out int readInstances);
         double w = Sum(_write, out int writeInstances);

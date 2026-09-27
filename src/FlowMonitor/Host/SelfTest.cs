@@ -994,6 +994,63 @@ public static class SelfTest
                             finally { Model.WidgetStore.DirectoryOverride = priorStore; }
                         }
 
+                        // --- 6h. GPU utilisation is real work, not a zeroed rate counter ---
+                        // Presenting our own D2D frames is genuine 3D engine work, so the
+                        // sampled utilisation has to exceed zero. "Utilization Percentage"
+                        // is rate-based: collecting a query twice in one sample re-reads it
+                        // with dt = 0 and reports 0 for the life of the process.
+                        {
+                            WidgetWindow? gw = null;
+                            try
+                            {
+                                gw = new WidgetWindow(fhost, new WidgetConfig
+                                {
+                                    Id = "selftest-gpu-load",
+                                    Width = 460,
+                                    Height = 200,
+                                    Graph = GraphKind.Cpu,
+                                    ClickThrough = ClickThroughMode.LeftClickOnly,
+                                });
+                                gw.Create(hwnd);
+                                fhost.TrackWidgetForTest(gw);
+
+                                var gpu = fhost.Telemetry.Gpu;
+                                if (gpu.Unsupported)
+                                {
+                                    Check(false, "GPU utilisation reads real engine work",
+                                        "unsupported: " + gpu.UnsupportedReason);
+                                }
+                                else
+                                {
+                                    double peak = 0;
+                                    int frames = 0, withEngines = 0;
+                                    for (int f = 0; f < 150; f++)
+                                    {
+                                        fhost.Telemetry.SampleNow();
+                                        gw.RequestRedraw();
+                                        gw.RenderFrame(TestNow + f / 60.0, 1f / 60f);
+                                        gw.CommitComposition();
+                                        frames++;
+                                        if (gpu.EngineSnapshot().Length > 0) withEngines++;
+                                        peak = Math.Max(peak, gpu.LastUtilization);
+                                        Thread.Sleep(4);
+                                    }
+                                    Check(withEngines > 0, "GPU engine rows exist while we render",
+                                        $"{withEngines}/{frames} samples reported engine instances, " +
+                                        $"peak {peak:0.00}%");
+                                    Check(peak > 0, "GPU utilisation reflects our own rendering",
+                                        $"peak {peak:0.00}% over {frames} presented frames " +
+                                        $"(a rate counter sampled with dt = 0 stays at 0)");
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                failures++;
+                                Log.Write("ERROR", "gpu load test threw: " + ex);
+                            }
+                            finally { try { gw?.Destroy(); } catch { } }
+                        }
+
                         // --- 6g. card contact sheet (--capture only) ---
                         // One capture per GraphKind on real telemetry, locked and edit,
                         // so every card can be eyeballed instead of assumed correct.

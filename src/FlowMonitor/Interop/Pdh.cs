@@ -79,6 +79,15 @@ internal static class Pdh
         return rc;
     }
 
+    /// <summary>
+    /// Collects every counter in the query. Call exactly once per sample, for the whole
+    /// query, never per counter: a second collection inside the same tick re-samples the
+    /// rate-based counters with dt = 0, so "Utilization Percentage" and "% Disk Time"
+    /// read 0 while raw byte counters keep working.
+    /// </summary>
+    public static uint Collect(IntPtr query)
+        => query == IntPtr.Zero ? PDH_INVALID_ARGUMENT : PdhCollectQueryData(query);
+
     /// <summary>A live counter. <see cref="Collect"/> must be called once per sample before reading.</summary>
     public sealed class Counter : IDisposable
     {
@@ -98,8 +107,6 @@ internal static class Pdh
         }
 
         public bool Valid => Handle != IntPtr.Zero;
-
-        public void Collect() { if (Valid) PdhCollectQueryData(Query); }
 
         /// <summary>Last formatted value, or NaN when the counter has no valid sample yet.</summary>
         public double Read()
@@ -146,8 +153,6 @@ internal static class Pdh
         }
 
         public bool Valid => Handle != IntPtr.Zero;
-
-        public void Collect() { if (Valid) PdhCollectQueryData(Query); }
 
         public int ItemSize => _itemSize;
         public uint LastError { get; private set; }

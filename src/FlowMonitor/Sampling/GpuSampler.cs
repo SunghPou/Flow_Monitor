@@ -103,12 +103,11 @@ public sealed class GpuSampler
 
     public void Update(double now)
     {
-        if (Unsupported) return;
+        if (Unsupported || _engines is null) return;
 
-        _engines!.Collect();
-        _dedicated?.Collect();
-        _shared?.Collect();
-        _committed?.Collect();
+        // One collection for the whole query: "Utilization Percentage" is rate-based and a
+        // second collection in the same tick samples it with dt = 0, which reads as 0%.
+        Pdh.Collect(_query);
 
         // ---- engines -------------------------------------------------------------------
         // Instances come and go with processes; accumulate into a fresh map each tick.
@@ -116,7 +115,7 @@ public sealed class GpuSampler
         var adapters = new Dictionary<string, int>(StringComparer.Ordinal);
         int seen = 0;
 
-        _engines.ReadAll((name, value) =>
+        _engines!.ReadAll((name, value) =>
         {
             seen++;
             if (!TryParseEngine(name, out string luid, out int phys, out string engType)) return;
