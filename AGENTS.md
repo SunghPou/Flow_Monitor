@@ -2,7 +2,7 @@
 
 1. Keep this document under 50 LOC. Low noise, high signal.
 2. Build: `dotnet build src/FlowMonitor/FlowMonitor.csproj -c Release` (bin/ locked while app runs; use `-p:OutputPath=<tmp>/`).
-3. Test: `FlowMonitor.exe --selftest [--capture <dir>]`; 0 = pass. Never commit captures/logs/bin/obj.
+3. Test: `FlowMonitor.exe --selftest [--capture <dir>]`; 0 = pass. `--capture` also writes a per-card contact sheet (`30-card-*`); view it before claiming any visual change works. Never commit captures/logs/bin/obj.
 4. Stack: .NET 9 WinExe x64, Vortice D3D11/D2D1/DXGI/DComp. Widgets are WorkerW children, never taskbar/Alt+Tab/focus.
 5. Comments describe current behavior only (1-3 lines). No history, no "used to", no war stories.
 6. Right-click locked widget re-enters edit mode (`WidgetWindow.OnRightButtonUp` -> `BeginEdit`). No mode sets persistent `WS_EX_TRANSPARENT`.
@@ -11,3 +11,7 @@
 9. Config: one JSON per widget in `%LOCALAPPDATA%/FlowMonitor/widgets`; atomic tmp+move writes; corrupt files skipped, never fatal.
 10. Coordinates: configs in virtual-screen px; surfaces in physical px (`Dpi`); lParam coords are sign-extended shorts.
 11. Rebuild the app and restart it before asking the human to test, so they always run the latest code.
+12. Header chrome follows `docs/design.md`; paint and hit-test share `HeaderLayout` (single definition).
+13. `PERFORMANCE_INFORMATION` must match native (104 bytes x64, `Pack = 8`, `PageSize` is `SIZE_T`); every count field is in pages, scale by `PageSize`.
+14. Chart chrome and axis ticks follow `docs/design.md`; byte scales are `ChartRenderer.ByteAxisMax` (power of two, floor 4).
+15. Sampler state the render thread reads is copied out under a lock (`GpuSampler.EngineSnapshot`); never enumerate a list the sampling thread rebuilds.

@@ -18,6 +18,7 @@ public sealed class ResourceCache : IDisposable
     public IDWriteTextFormat Subtitle { get; }
     public IDWriteTextFormat HeaderValue { get; }
     public IDWriteTextFormat Axis { get; }
+    public IDWriteTextFormat AxisRight { get; }
     public IDWriteTextFormat Micro { get; }
     public IDWriteTextFormat Body { get; }
     public IDWriteTextFormat Bold { get; }
@@ -34,6 +35,9 @@ public sealed class ResourceCache : IDisposable
         HeaderValue = device.CreateTextFormat("Segoe UI Variable Display", 21f, FontWeight.SemiBold,
             hAlign: TextAlignment.Trailing);
         Axis = device.CreateTextFormat("Segoe UI Variable Text", 9.5f, FontWeight.Normal);
+        // Axis labels sit in the left gutter, flush to the plot edge.
+        AxisRight = device.CreateTextFormat("Segoe UI Variable Text", 9.5f, FontWeight.Normal,
+            hAlign: TextAlignment.Trailing);
         Micro = device.CreateTextFormat("Segoe UI Variable Text", 9.5f, FontWeight.Normal);
         Body = device.CreateTextFormat("Segoe UI Variable Text", 12.5f, FontWeight.Normal);
         Bold = device.CreateTextFormat("Segoe UI Variable Text", 12.5f, FontWeight.Bold);

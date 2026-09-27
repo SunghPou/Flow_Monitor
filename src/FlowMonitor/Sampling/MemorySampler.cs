@@ -5,7 +5,7 @@ using FlowMonitor.Metrics;
 
 namespace FlowMonitor.Sampling;
 
-[StructLayout(LayoutKind.Sequential)]
+[StructLayout(LayoutKind.Sequential, Pack = 8)]
 public struct PERFORMANCE_INFORMATION
 {
     public uint cb;
@@ -14,12 +14,11 @@ public struct PERFORMANCE_INFORMATION
     public ulong CommitPeak;
     public ulong PhysicalTotal;
     public ulong PhysicalAvailable;
-    public ulong PhysicalPageList;
     public ulong SystemCache;
     public ulong KernelTotal;
     public ulong KernelPaged;
     public ulong KernelNonpaged;
-    public uint PageSize;
+    public ulong PageSize;
     public uint HandleCount;
     public uint ProcessCount;
     public uint ThreadCount;
@@ -27,8 +26,8 @@ public struct PERFORMANCE_INFORMATION
 
 /// <summary>
 /// Physical memory breakdown in the same shape Task Manager shows it, sourced from
-/// GetPerformanceInfo (the exact API Task Manager uses): In use, Cached, Available stacked as
-/// percentages of physical total, plus a separate Committed trace.
+/// GetPerformanceInfo (the exact API Task Manager uses): In use, Cached and
+/// cache-excluded Available stack to the physical total, plus Committed in bytes.
 /// </summary>
 public sealed class MemorySampler
 {
@@ -60,25 +59,30 @@ public sealed class MemorySampler
     {
         if (!PsApi.GetPerformanceInfo(out var pi)) return;
 
-        // Page-denominated fields scaled by page size; commit fields are already bytes.
-        long pageSize = pi.PageSize == 0 ? 4096 : pi.PageSize;
+        // Every count field arrives in pages; all are scaled by the page size.
+        // Available includes the standby cache, so the plotted Available is free
+        // memory excluding cache: InUse + Cached + Available then stacks to total.
+        long pageSize = pi.PageSize == 0 ? 4096 : (long)pi.PageSize;
         long total = (long)pi.PhysicalTotal * pageSize;
         long avail = (long)pi.PhysicalAvailable * pageSize;
         long cached = (long)pi.SystemCache * pageSize;
+        long committed = (long)pi.CommitTotal * pageSize;
+        long commitLimit = (long)pi.CommitLimit * pageSize;
 
         long inUse = Math.Max(0, total - avail);
+        long free = Math.Max(0, avail - cached);
 
         TotalPhysical = total;
-        TotalCommitLimit = (long)pi.CommitLimit;
+        TotalCommitLimit = commitLimit;
         LastInUse = inUse;
         LastCached = cached;
-        LastCommitted = (long)pi.CommitTotal;
+        LastCommitted = committed;
 
         _telemetry.Add(InUse, now, inUse);
         _telemetry.Add(Cached, now, cached);
-        _telemetry.Add(Available, now, avail);
-        _telemetry.Add(Committed, now, (float)pi.CommitTotal);
-        _telemetry.Add(CommitLimit, now, (float)pi.CommitLimit);
+        _telemetry.Add(Available, now, free);
+        _telemetry.Add(Committed, now, committed);
+        _telemetry.Add(CommitLimit, now, commitLimit);
     }
 }
 

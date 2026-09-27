@@ -16,6 +16,19 @@ public static class WidgetPainter
     static readonly Color4 BorderHover = new(1f, 1f, 1f, 0.17f);
     static readonly Color4 ArrowInk = new(1f, 1f, 1f, 0.60f);
 
+    /// <summary>Badge glyph half-extent as a fraction of its box, at full ease.</summary>
+    public const float BadgeInk = 0.32f;
+    /// <summary>Drawn half-width of a badge glyph in logical px (HeaderLayout reserves this).</summary>
+    public static readonly float BadgeGlyphHalf = WidgetWindow.CheckMarkSize * BadgeInk;
+    /// <summary>Drawn half-width of a metric chevron in logical px at full ease.</summary>
+    public const float ChevronGlyphHalf = 6f;
+    /// <summary>Corner bracket inset from the card edge, in logical px.</summary>
+    public const float CornerInset = 5.5f;
+    /// <summary>Corner bracket arm length, in logical px.</summary>
+    public const float CornerLen = 11f;
+    /// <summary>Outermost strip a corner bracket occupies (HeaderLayout keeps badges clear of it).</summary>
+    public const float CornerSpan = CornerInset + CornerLen;
+
     public static void PaintBackground(ID2D1DeviceContext dc, ResourceCache res, WidgetConfig cfg,
         float width, float height, float hover, float checkAmount, bool editing)
     {
@@ -52,7 +65,7 @@ public static class WidgetPainter
         dc.Transform = Matrix3x2.CreateScale(sc, sc, center);
 
         // ✓ glyph, sized as before; only its brightness reacts to hover.
-        float r = size * 0.42f;
+        float r = size * BadgeInk;
         var p0 = new V2(center.X - r * 0.44f, center.Y + r * 0.02f);
         var p1 = new V2(center.X - r * 0.11f, center.Y + r * 0.35f);
         var p2 = new V2(center.X + r * 0.46f, center.Y - r * 0.36f);
@@ -87,7 +100,7 @@ public static class WidgetPainter
         dc.Transform = Matrix3x2.CreateScale(sc, sc, center);
 
         // ✕ glyph: two crossing round-capped strokes; only brightness reacts to hover.
-        float r = size * 0.42f;
+        float r = size * BadgeInk;
         float w = Math.Max(2f, size * 0.115f);
         float d = r * 0.46f;
         var glyph = res.Brush(new Color4(1f, 1f, 1f, amount * (0.5f + 0.5f * hover)));
@@ -99,23 +112,24 @@ public static class WidgetPainter
     }
 
     /// <summary>
-    /// Metric switcher chevrons flanking the centered title. Edit mode only; same neutral ink.
+    /// Metric switcher chevrons flanking the title. Edit mode only; boxes come from
+    /// HeaderLayout via the window, so paint and hit-test are the same rects.
     /// </summary>
     public static void PaintMetricArrows(ID2D1DeviceContext dc, ResourceCache res, WidgetConfig cfg,
-        float width, float height, float amount)
+        float width, float height, float amount,
+        System.Drawing.RectangleF prevLogical, System.Drawing.RectangleF nextLogical)
     {
         if (amount <= 0.01f) return;
         float s = cfg.Dpi;
         float ease = Ease(amount);
-        int logicalW = (int)MathF.Round(width / s);
         float w = Math.Max(2f, 2.2f * s);
 
-        foreach (int i in new[] { 0, 1 })
+        var boxes = new[] { (prevLogical, true), (nextLogical, false) };
+        foreach (var (lr, prev) in boxes)
         {
-            var lr = i == 0 ? WidgetWindow.PrevMetricBadgeRect(logicalW) : WidgetWindow.NextMetricBadgeRect(logicalW);
-            bool prev = i == 0;
+            if (lr.Width <= 0) continue;
             var center = new V2((lr.Left + lr.Width * 0.5f) * s, (lr.Top + lr.Height * 0.5f) * s);
-            float r = lr.Width * 0.22f * s * (0.70f + 0.30f * ease);
+            float r = ChevronGlyphHalf * (0.70f + 0.30f * ease) * s;
             var ink = res.Brush(new Color4(ArrowInk.R, ArrowInk.G, ArrowInk.B, ArrowInk.A * amount));
             dc.PushAxisAlignedClip(new RectF(0, 0, width, height), AntialiasMode.Aliased);
             if (prev)
@@ -136,8 +150,8 @@ public static class WidgetPainter
         float width, float height, float hover)
     {
         float s = cfg.Dpi;
-        float len = 11f * s;
-        float inset = 5.5f * s;
+        float len = CornerLen * s;
+        float inset = CornerInset * s;
         var brush = res.Brush(new Color4(1f, 1f, 1f, 0.34f + 0.5f * hover));
         float w = Math.Max(1.25f, 1.25f * s);
 

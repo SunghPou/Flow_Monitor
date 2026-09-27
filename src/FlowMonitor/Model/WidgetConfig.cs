@@ -12,6 +12,7 @@ public enum GraphKind
     Gpu,
     GpuCores,
     Fans,
+    Vram,
 }
 
 /// <summary>
@@ -141,7 +142,7 @@ public static class WidgetConfigColors
         GraphKind.Memory => c.LineColorMemory,
         GraphKind.Disk => c.LineColorDisk,
         GraphKind.Network => c.LineColorNetwork,
-        GraphKind.Gpu or GraphKind.GpuCores => c.LineColorGpu,
+        GraphKind.Gpu or GraphKind.GpuCores or GraphKind.Vram => c.LineColorGpu,
         GraphKind.Fans => c.LineColorFans,
         _ => c.AccentHex,
     };

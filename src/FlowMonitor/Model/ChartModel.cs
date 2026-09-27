@@ -62,11 +62,10 @@ public sealed class ChartModel
     public double SampleIntervalSec { get; set; } = 1.0;
 
     /// <summary>
-    /// DIPs of blank space to reserve at the right edge of the header row, so the edit-mode
-    /// checkmark badge never sits on top of the header value. The header row owns this; the badge
-    /// painter does not know where the text is. 0 when the badge is hidden.
+    /// Edit chrome (badges, metric chevrons) is visible, so the header follows the
+    /// edit branch of HeaderLayout. Binary with the mode; only opacity animates.
     /// </summary>
-    public float HeaderReserveRight { get; set; }
+    public bool EditChrome { get; set; }
 
     /// <summary>Series are stacked bands (Task Manager's memory graph) rather than
     /// independent curves sharing one axis.</summary>

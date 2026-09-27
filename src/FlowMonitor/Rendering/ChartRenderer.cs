@@ -79,57 +79,67 @@ public sealed class ChartRenderer
         var bounds = new RectF(0, 0, width, height);
 
         // ---------------------------------------------------------------- header
+        // Title + value only, laid out by HeaderLayout (docs/design.md): the
+        // < title > group is centred on the card, the value is right-anchored, and
+        // the title yields width so the two can never touch.
         float pad = 12f * s;
         if (cfg.ShowLabels)
         {
-            string text = cfg.ShowUnits && !string.IsNullOrEmpty(model.ValueUnit)
-                ? model.ValueText + " " + model.ValueUnit
-                : model.ValueText;
+            string text = !cfg.ShowUnits || string.IsNullOrEmpty(model.ValueUnit)
+                ? model.ValueText
+                : model.ValueText + (TightUnit(model.ValueUnit) ? "" : " ") + model.ValueUnit;
 
-            var layoutSize = _res.Measure(text, _res.HeaderValue, s);
-            float vw = layoutSize.Width;
-            // Reserve space for the edit-mode badge so the value shifts left when it shows.
-            float reserve = model.HeaderReserveRight * s;
-            // RectangleF is (x, y, width, height).
-            var valueRect = new RectF(bounds.Width - pad - reserve - vw, 3f * s, vw, 26f * s);
-            dc.DrawText(text, _res.HeaderValue, R(valueRect), _res.Brush(ValueText));
+            float titleW = _res.Measure(model.Title, _res.Title, s).Width / s;
+            float valueW = _res.Measure(text, _res.HeaderValue, s).Width / s;
+            float logicalW = bounds.Width / s;
+            var header = Widgets.HeaderLayout.Compute(logicalW, titleW, valueW, model.EditChrome);
 
-            // Title centred between the top edge and the plot; shifted left only if it
-            // would otherwise run into the header value on narrow widgets.
-            var titleSize = _res.Measure(model.Title, _res.Title, s);
-            float tx = (bounds.Width - titleSize.Width) / 2f;
-            tx = Math.Max(pad, Math.Min(tx, valueRect.Left - 8f * s - titleSize.Width));
-            var titleRect = new RectF(tx, 8f * s, titleSize.Width + 1f, 15f * s);
+            var titleRect = new RectF(header.Title.X * s, header.Title.Y * s,
+                header.Title.Width * s, header.Title.Height * s);
             dc.DrawText(model.Title, _res.Title, R(titleRect), _res.Brush(TitleText));
-
-            if (!string.IsNullOrEmpty(model.Subtitle) && bounds.Height > 96f * s)
-            {
-                // Title is y=8..23; subtitle at y=26 leaves a gap.
-                var subRect = new RectF(pad, 26f * s, bounds.Width * 0.6f, 12f * s);
-                dc.DrawText(model.Subtitle, _res.Subtitle, R(subRect), _res.Brush(SubtitleText));
-            }
+            var valueRect = new RectF(header.Value.X * s, header.Value.Y * s,
+                header.Value.Width * s, header.Value.Height * s);
+            dc.DrawText(FitValue(text, header.ValueMax, s), _res.HeaderValue, R(valueRect),
+                _res.Brush(ValueText));
+            // No subtitle: the header is title + value only. model.Subtitle is kept
+            // as data but never drawn.
         }
 
         // ---------------------------------------------------------------- plot rect
-        // Axis labels are centred on their gridlines; plotTop clears the subtitle.
+        // plotTop clears the title/value row; the subtitle slot stays empty air.
         float plotTop = cfg.ShowLabels ? 50f * s : pad;
         float plotLeft = pad;
         float plotRight = bounds.Width - pad;
         float plotBottom = bounds.Height - pad;
         if (cfg.ShowMinMax && bounds.Height > 120f * s)
             plotBottom -= 14f * s;
+        double axisMax = model.AutoRange ? ComputeAutoMax(model) : model.AxisMax;
+        if (axisMax <= 0) axisMax = 100;
+
+        // Byte axes reserve a left gutter sized to their own widest label, so the labels
+        // sit outside the plot, never clip, and the curve never runs under them; percent
+        // axes draw no labels and span the full width.
+        string[] axisLabels = ShowsAxisLabels(model, axisMax) ? AxisLabels(model, axisMax) : [];
+        float gutter = 0f, labelInset = 0f;
+        if (axisLabels.Length > 0)
+        {
+            // In edit mode the bottom-left corner bracket reaches CornerSpan into the card,
+            // so the label column starts past it; otherwise the bracket arm crosses "0 B".
+            labelInset = AxisLabelInset(model.EditChrome, s);
+            foreach (string label in axisLabels)
+                gutter = Math.Max(gutter, _res.Measure(label, _res.AxisRight, s).Width
+                    + Widgets.HeaderLayout.GapText * s + labelInset);
+            plotLeft += gutter;
+        }
 
         // RectangleF is (x, y, width, height).
         var plot = new RectF(plotLeft, plotTop, plotRight - plotLeft, plotBottom - plotTop);
         if (plot.Width < 8f || plot.Height < 8f) return;
 
-        double axisMax = model.AutoRange ? ComputeAutoMax(model) : model.AxisMax;
-        if (axisMax <= 0) axisMax = 100;
-
         // ---------------------------------------------------------------- gridlines
         // Labels are painted after the curves so the curve never strikes through them.
         if (cfg.ShowGrid)
-            DrawGridLines(dc, plot, model, s);
+            DrawGridLines(dc, plot, model, axisMax, s);
 
         // ---------------------------------------------------------------- curves
         // MC parity: the newest VisiblePoints samples spread across the plot width,
@@ -160,9 +170,8 @@ public sealed class ChartRenderer
         }
         finally { dc.PopAxisAlignedClip(); }
 
-        // Axis labels above the curves: same grid positions, painted last.
-        if (cfg.ShowGrid && model.ShowAxisLabels)
-            DrawAxisLabels(dc, plot, axisMax, model, s);
+        // Axis labels outside the plot, painted after the curves.
+        DrawAxisLabels(dc, plot, axisLabels, gutter, labelInset, s);
 
         if (_slots.Count > model.Series.Count) _frameChanged = true;
 
@@ -180,6 +189,9 @@ public sealed class ChartRenderer
         double axisMax, float s, int slots, double slotW, float enterX)
     {
         EnsureSlotCapacity(model.Series.Count, slots);
+        // Overlaid series divide the fill: MC sets the all-threads group's opacity to
+        // 100/255/cpu_count (performance_page/cpu.rs, GRAPH_SELECTION_ALL_THREADS), so
+        // 16 overlapping core fills read as tints instead of one saturated block.
 
         for (int si = 0; si < model.Series.Count; si++)
         {
@@ -201,7 +213,7 @@ public sealed class ChartRenderer
             bool primary = !series.Secondary;
             float width = Math.Max(0.75f, cfg.LineThickness * s * (primary ? 1f : 0.75f));
             DrawRuns(dc, cfg, slot.Points, slots, plot, series.Color, width,
-                series.Fill && primary ? cfg.FillOpacity : 0f);
+                series.Fill && primary ? cfg.FillOpacity / model.Series.Count : 0f);
 
             slot.FrontIsA = !slot.FrontIsA;
             if (changed) _frameChanged = true;
@@ -320,41 +332,61 @@ public sealed class ChartRenderer
 
     // ------------------------------------------------------------------ grid
 
-    void DrawGridLines(ID2D1DeviceContext dc, RectF plot, ChartModel model, float s)
+    void DrawGridLines(ID2D1DeviceContext dc, RectF plot, ChartModel model, double axisMax, float s)
     {
         var soft = _res.Brush(GridLine);
         var strong = _res.Brush(GridLineStrong);
         var stroke = _res.Hairline;
 
-        float gridLeft = plot.Left + AxisGutter(model, s);
-
         for (int i = 0; i <= 4; i++)
         {
             float y = plot.Bottom - (float)(plot.Height * (i / 4.0));
             bool edge = i == 0 || i == 4;
-            dc.DrawLine(new V2(gridLeft, y), new V2(plot.Right, y), edge ? strong : soft, 1f, stroke);
+            dc.DrawLine(new V2(plot.Left, y), new V2(plot.Right, y), edge ? strong : soft, 1f, stroke);
         }
     }
 
-    // Gutter width shared by gridlines and labels; 0 when labels are off.
-    static float AxisGutter(ChartModel model, float s) => model.ShowAxisLabels ? 40f * s : 0f;
+    /// <summary>Percent axes draw no left-side labels; byte axes keep theirs.</summary>
+    static bool ShowsAxisLabels(ChartModel model, double axisMax)
+        => model.ShowAxisLabels && !model.PercentAxis && axisMax > 0;
 
-    void DrawAxisLabels(ID2D1DeviceContext dc, RectF plot, double axisMax, ChartModel model, float s)
+    /// <summary>
+    /// Byte-axis tick labels, right-aligned in the reserved gutter left of the plot, each
+    /// vertically centred on its gridline. Only byte axes reach here; percent axes
+    /// return early in <see cref="ShowsAxisLabels"/>.
+    /// </summary>
+    void DrawAxisLabels(ID2D1DeviceContext dc, RectF plot, string[] labels, float gutter,
+        float labelInset, float s)
     {
-        float gutter = 40f * s;
-        var fmt = _res.Axis;
-        for (int i = 4; i >= 0; i--)
+        if (gutter <= 0f) return;
+        var fmt = _res.AxisRight;
+        for (int i = labels.Length - 1; i >= 0; i--)
         {
             float y = plot.Bottom - (float)(plot.Height * (i / 4.0));
-            double v = axisMax * i / 4.0;
-            // Percent suffix only when the axis is a true percent axis (max <= 100).
-            string label = (model.PercentAxis && axisMax <= 100.0)
-                ? v.ToString("0") + "%"
-                : FormatShort(v);
-            // Labels are centred on their gridline, inside the plot.
-            var r = new RectF(plot.Left, y - 7f * s, gutter - 4f * s, 14f * s);
-            dc.DrawText(label, fmt, R(r), _res.Brush(AxisText));
+            // GapText separates label ink from the plot, per docs/design.md.
+            var r = new RectF(plot.Left - gutter + labelInset, y - 7f * s,
+                gutter - Widgets.HeaderLayout.GapText * s - labelInset, 14f * s);
+            dc.DrawText(labels[i], fmt, R(r), _res.Brush(AxisText));
         }
+    }
+
+    /// <summary>Five byte-axis tick labels, bottom to top.</summary>
+    string[] AxisLabels(ChartModel model, double axisMax)
+    {
+        var labels = new string[5];
+        for (int i = 0; i < labels.Length; i++)
+            labels[i] = AxisLabel(axisMax * i / 4.0, model);
+        return labels;
+    }
+
+    /// <summary>
+    /// One byte-axis label. Byte units are spelled out on every tick ("34.1 GB",
+    /// "1 KB/s" on rate axes) so no gridline is ever read as a bare number.
+    /// </summary>
+    internal static string AxisLabel(double v, ChartModel model)
+    {
+        string text = FormatBytes(v);
+        return model.ValueUnit.Contains('/') ? text + model.ValueUnit : text;
     }
 
     // ------------------------------------------------------------------ curves
@@ -501,7 +533,13 @@ public sealed class ChartRenderer
             foreach (float v in s.Snapshot)
                 if (!float.IsNaN(v) && v > max) max = v;
 
-        if (max <= 0) return 1;
+        if (max <= 0) return model.PercentAxis ? 1 : 4;
+        // Byte axes round up like MC's RoundingSettings::Pow2 (graph-widget
+        // core/src/scaling.rs): a power of two, which divides into clean quarters
+        // for a 1024-based formatter (128/96/64/32 KB). MC's Pow2Base10 variant
+        // assumes 1000-based labels, which FormatBytes is not. The floor of 4 keeps
+        // quarters at a whole unit, so an idle 0.6 B/s still reads 1/2/3/4 B/s.
+        if (!model.PercentAxis) return ByteAxisMax(max);
         double mag = Math.Pow(10, Math.Floor(Math.Log10(max)));
         foreach (double cand in new[] { 1.0, 1.25, 1.5, 2.0, 2.5, 3.0, 4.0, 5.0, 7.5, 10.0, 15.0, 20.0 })
         {
@@ -510,6 +548,66 @@ public sealed class ChartRenderer
         }
         return mag * 25.0;
     }
+
+    /// <summary>
+    /// Ceiling to the next power of two. Port of MC's
+    /// RoundingSettings::round_up_to_next_power_of_two (core/src/scaling.rs).
+    /// </summary>
+    internal static double RoundUpPow2(double n)
+    {
+        if (n <= 0) return 0;
+        double p = 1;
+        while (p < n) p *= 2;
+        return p;
+    }
+
+    /// <summary>
+    /// Auto-scale maximum for byte axes: the next power of two, floored at 4 so the
+    /// quarter ticks stay whole units.
+    /// </summary>
+    internal static double ByteAxisMax(double peak) => Math.Max(4, RoundUpPow2(peak));
+
+    /// <summary>
+    /// Left inset of the axis-label column. Edit-mode corner brackets reach
+    /// <see cref="Widgets.WidgetPainter.CornerSpan"/> into the card, so labels start
+    /// past them instead of being crossed by a bracket arm.
+    /// </summary>
+    internal static float AxisLabelInset(bool editChrome, float s)
+        => editChrome ? (Widgets.WidgetPainter.CornerSpan + Widgets.HeaderLayout.GapText) * s : 0f;
+
+    /// <summary>
+    /// Fits the header value into maxW: the full text, then the same number with
+    /// fewer decimals, then an ellipsized tail. The value yields space so the
+    /// centred &lt; title &gt; group never moves (docs/design.md).
+    /// </summary>
+    string FitValue(string text, float maxW, float s)
+    {
+        if (maxW <= 0f || ValueWidth(text, s) <= maxW) return text;
+
+        int sp = text.IndexOf(' ');
+        if (sp > 0 && double.TryParse(text.AsSpan(0, sp), System.Globalization.NumberStyles.Float,
+            System.Globalization.CultureInfo.InvariantCulture, out double v))
+        {
+            foreach (string n in new[] { v.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture),
+                                         v.ToString("0", System.Globalization.CultureInfo.InvariantCulture) })
+            {
+                string cand = n + text[sp..];
+                if (ValueWidth(cand, s) <= maxW) return cand;
+            }
+        }
+
+        for (int n = text.Length - 1; n > 0; n--)
+        {
+            string cand = text[..n].TrimEnd() + "\u2026";
+            if (ValueWidth(cand, s) <= maxW) return cand;
+        }
+        return text;
+    }
+
+    float ValueWidth(string text, float s) => _res.Measure(text, _res.HeaderValue, s).Width / s;
+
+    /// <summary>Units that bind to the number without a space: 12%, 0B/s.</summary>
+    static bool TightUnit(string unit) => unit[0] is '%' or '/';
 
     public static string FormatShort(double v)
     {

@@ -95,6 +95,9 @@ public sealed class DesktopHost : IRenderHost, IDisposable
 
     public DesktopHost()
     {
+        // Every sample tick wakes all widgets. Locked widgets skip frames while the curve
+        // is flat, so a redraw request is the only thing that restarts their polling.
+        _telemetry.Sampled += WakeWidgetsForNewSample;
         try
         {
             Device = new RenderDevice();
@@ -925,7 +928,7 @@ public sealed class DesktopHost : IRenderHost, IDisposable
 
                 return new ChartModel
                 {
-                    Title = "Memory",
+                    Title = "RAM",
                     Subtitle = $"{ChartRenderer.FormatBytes(committed)} committed",
                     Series =
                     [
@@ -935,7 +938,8 @@ public sealed class DesktopHost : IRenderHost, IDisposable
                     ],
                     Stacked = true,
                     AxisMax = total,
-                    PercentAxis = true,
+                    // Byte axis with labels: values are bytes, not 0-100.
+                    PercentAxis = false,
                     ValueText = ChartRenderer.FormatBytes(inUse),
                     ValueUnit = "",
                     WindowSeconds = Math.Max(2, cfg.WindowSeconds),
@@ -967,7 +971,8 @@ public sealed class DesktopHost : IRenderHost, IDisposable
                     r = disk.LastRead; w = disk.LastWrite; busy = disk.LastBusy;
                     bytesDead = disk.ByteRatesUnavailable;
                     bytesReason = disk.ByteRatesUnavailableReason;
-                    _max = disk.ReadBytes.Peak(now - window) + disk.WriteBytes.Peak(now - window);
+                    // Both directions share one auto scale (the renderer's ByteAxisMax
+                    // reads both series), like MC's connected read/write datasets.
                     dMin = disk.ActivePercent.Min(now - window);
                     dMax = disk.ActivePercent.Peak(now - window);
                     dAvg = dMax;
@@ -1004,8 +1009,8 @@ public sealed class DesktopHost : IRenderHost, IDisposable
                         new ChartSeries { Name = "Read", Data = disk.ReadBytes, Color = new Color4(0.36f, 0.66f, 0.86f, 1f) },
                         new ChartSeries { Name = "Write", Data = disk.WriteBytes, Color = new Color4(0.20f, 0.44f, 0.70f, 1f) },
                     ],
-                    AxisMax = Math.Max(1024, _max * 1.15),
                     AutoRange = true,
+                    PercentAxis = false,
                     ValueText = ChartRenderer.FormatBytes(r),
                     ValueUnit = "/s",
                     MinMaxText = $"Read {ChartRenderer.FormatBytes(r)}/s    Write {ChartRenderer.FormatBytes(w)}/s",
@@ -1023,7 +1028,6 @@ public sealed class DesktopHost : IRenderHost, IDisposable
                 {
                     tx = net.LastSend; rx = net.LastRecv;
                     if (net.Available) { name = net.InterfaceName; desc = net.InterfaceDescription; }
-                    _max = net.SendBytes.Peak(now - window) + net.RecvBytes.Peak(now - window);
                 });
 
                 bool wireless = desc.Contains("Wi-Fi", StringComparison.OrdinalIgnoreCase)
@@ -1040,8 +1044,8 @@ public sealed class DesktopHost : IRenderHost, IDisposable
                         new ChartSeries { Name = "Send", Data = net.SendBytes, Color = new Color4(0.30f, 0.74f, 0.80f, 1f) },
                         new ChartSeries { Name = "Receive", Data = net.RecvBytes, Color = new Color4(0.24f, 0.55f, 0.86f, 1f) },
                     ],
-                    AxisMax = Math.Max(1024, _max * 1.15),
                     AutoRange = true,
+                    PercentAxis = false,
                     ValueText = ChartRenderer.FormatBytes(rx),
                     ValueUnit = "/s",
                     MinMaxText = $"Send {ChartRenderer.FormatBytes(tx)}/s    Receive {ChartRenderer.FormatBytes(rx)}/s",
@@ -1073,8 +1077,9 @@ public sealed class DesktopHost : IRenderHost, IDisposable
                     // No second axis: VRAM reported as a share of committed total.
                     if (gpu.LastCommitted > 0)
                         committedPct = (float)Math.Clamp(gpu.LastDedicatedUsed * 100.0 / gpu.LastCommitted, 0, 100);
-                    if (gpu.Engines.Count > 0)
-                        engines = string.Join("  ", gpu.Engines.Select(e => $"{e.Name} {e.Percent:0}%"));
+                    var engineSnapshot = gpu.EngineSnapshot();
+                    if (engineSnapshot.Length > 0)
+                        engines = string.Join("  ", engineSnapshot.Select(e => $"{e.Name} {e.Percent:0}%"));
                 });
 
                 _telemetry.Read(() =>
@@ -1118,7 +1123,7 @@ public sealed class DesktopHost : IRenderHost, IDisposable
                 _telemetry.Read(() =>
                 {
                     int n = 0;
-                    foreach (var e in gpu.Engines)
+                    foreach (var e in gpu.EngineSnapshot())
                     {
                         var s = gpu.EngineSeries(e.Name);
                         if (s is null) continue;
@@ -1148,6 +1153,43 @@ public sealed class DesktopHost : IRenderHost, IDisposable
                     PercentAxis = true,
                     ValueText = util.ToString("0.0", CultureInfo.InvariantCulture),
                     ValueUnit = "%",
+                    WindowSeconds = Math.Max(2, cfg.WindowSeconds),
+                };
+            }
+
+            case GraphKind.Vram:
+            {
+                var gpu = _telemetry.Gpu;
+                if (gpu.Unsupported)
+                {
+                    return new ChartModel
+                    {
+                        Title = "VRAM",
+                        Subtitle = "",
+                        Series = [],
+                        AxisMax = 100,
+                        ValueText = "--",
+                    };
+                }
+
+                long total = 0, used = 0;
+                _telemetry.Read(() =>
+                {
+                    total = gpu.LastCommitted;
+                    used = gpu.LastDedicatedUsed;
+                });
+                if (total <= 0) total = 1;
+
+                return new ChartModel
+                {
+                    Title = "VRAM",
+                    Subtitle = "",
+                    Series = [new ChartSeries { Name = "VRAM", Data = gpu.DedicatedUsedBytes!, Color = accent }],
+                    AxisMax = total,
+                    AutoRange = true,
+                    PercentAxis = false,
+                    ValueText = ChartRenderer.FormatBytes(used),
+                    ValueUnit = "",
                     WindowSeconds = Math.Max(2, cfg.WindowSeconds),
                 };
             }
@@ -1219,17 +1261,33 @@ public sealed class DesktopHost : IRenderHost, IDisposable
 
     public Telemetry Telemetry => _telemetry;
 
+    /// <summary>
+    /// One tick landed: request a redraw on every widget. Runs on the telemetry thread;
+    /// RequestRedraw is a volatile write, so this never blocks sampling.
+    /// </summary>
+    void WakeWidgetsForNewSample()
+    {
+        WidgetWindow[] snapshot;
+        lock (_widgets) snapshot = _widgets.ToArray();
+        foreach (var w in snapshot) w.RequestRedraw();
+    }
+
+    /// <summary>Test seam: track an externally-created widget so the sample wakeup reaches it.</summary>
+    internal void TrackWidgetForTest(WidgetWindow w)
+    {
+        lock (_widgets) _widgets.Add(w);
+    }
+
     public void Dispose()
     {
         _running = false;
         _renderStop.Set();
-
         // Join the control thread (parked in WaitAny on _renderStop), then the render thread.
         if (_controlThread is not null && _controlThread.IsAlive) _controlThread.Join(500);
         _renderThread?.Join(500);
 
+        _telemetry.Sampled -= WakeWidgetsForNewSample;
         _telemetry.Dispose();
-
         // Close the control channel before graphics teardown.
         if (_controlWnd != IntPtr.Zero) { DestroyWindow(_controlWnd); _controlWnd = IntPtr.Zero; }
         if (_killEvent != IntPtr.Zero) { CloseHandle(_killEvent); _killEvent = IntPtr.Zero; }

@@ -3,6 +3,7 @@ using FlowMonitor.Graphs;
 using FlowMonitor.Interop;
 using FlowMonitor.Model;
 using FlowMonitor.Rendering;
+using FlowMonitor.Sampling;
 using FlowMonitor.Widgets;
 using Vortice.Direct2D1;
 using Rect = Vortice.Mathematics.Rect;
@@ -382,11 +383,154 @@ public static class SelfTest
             Check(whitePixels >= 20, "header value renders in the top right",
                 $"{whitePixels} near-white pixels (header value is missing if this is 0)");
 
-            // Scan from the plot top so title/subtitle are excluded; expect 5 labels.
+            // Scan from the plot top so the title is excluded. Percent axes draw no
+            // left-side labels; byte axes still draw all five.
             int plotTopScan = 44;
-            int labelBands = CountTextBands(pxA, surface.Width, surface.Height, plotTopScan);
-            Check(labelBands >= 5, "all five axis labels render inside the plot area",
-                $"{labelBands} text bands from y={plotTopScan} down the left axis strip (expected 5; the header is excluded so it cannot pad the count)");
+            int percentBands = CountTextBands(pxA, surface.Width, surface.Height, plotTopScan);
+            Check(percentBands == 0, "percent axis draws no left-side labels",
+                $"{percentBands} text bands from y={plotTopScan} (expected 0; 0%-100% labels are removed)");
+
+            var bytesModel = BuildSineModel(surface.Width, surface.Height, percent: false, axisMax: 16e9);
+            Snap(bytesModel);
+            byte[] pxBytes = GrabModel(bytesModel, TestNow, Cap("07-axis-bytes"));
+            int byteBands = CountTextBands(pxBytes, surface.Width, surface.Height, plotTopScan);
+            Check(byteBands >= 5, "byte axis still draws all five labels",
+                $"{byteBands} text bands from y={plotTopScan} (expected 5)");
+
+            // Byte labels carry their unit on every tick, so no gridline reads as a
+            // bare number; rate axes append the per-second unit. FormatBytes is
+            // 1024-based, like MC's to_human_readable_nice.
+            const double GiB = 1L << 30;
+            Check(ChartRenderer.AxisLabel(34.1 * GiB, bytesModel) == "34.1 GB"
+               && ChartRenderer.AxisLabel(0, bytesModel) == "0 B",
+                "byte axis labels spell out their unit",
+                $"\"{ChartRenderer.AxisLabel(34.1 * GiB, bytesModel)}\" and \"{ChartRenderer.AxisLabel(0, bytesModel)}\"");
+            var rateModel = BuildSineModel(surface.Width, surface.Height, percent: false,
+                axisMax: 1024, valueUnit: "/s");
+            Check(ChartRenderer.AxisLabel(1024, rateModel) == "1 KB/s",
+                "rate axis labels carry the per-second unit",
+                $"\"{ChartRenderer.AxisLabel(1024, rateModel)}\" (expected 1 KB/s)");
+
+            // MC rounding: RoundingSettings::Pow2. A power of two divides into clean
+            // quarters for the 1024-based formatter we draw with, so ticks read
+            // 128/96/64/32 KB instead of 125/93.8/62.5/31.3.
+            Check(ChartRenderer.RoundUpPow2(900) == 1024
+               && ChartRenderer.RoundUpPow2(1500) == 2048
+               && ChartRenderer.RoundUpPow2(3000) == 4096
+               && ChartRenderer.RoundUpPow2(1_500_000) == 2_097_152
+               && ChartRenderer.RoundUpPow2(4_000_000) == 4_194_304
+               && ChartRenderer.RoundUpPow2(4_194_304) == 4_194_304,
+                "byte auto-scale rounds up to a power of two like Mission Center",
+                $"900->{ChartRenderer.RoundUpPow2(900)}, 1500->{ChartRenderer.RoundUpPow2(1500)}, " +
+                $"3000->{ChartRenderer.RoundUpPow2(3000)}, 1.5e6->{ChartRenderer.RoundUpPow2(1_500_000)}");
+
+            // The quarters of a power-of-two byte scale must print as whole numbers in
+            // the formatter we actually draw, or every tick reads "93.8 KB/s".
+            string[] quarterTicks = new[] { 0.0, 0.25, 0.5, 0.75, 1.0 }
+                .Select(f => ChartRenderer.AxisLabel(1024.0 * 1024.0 * f, rateModel)).ToArray();
+            Check(quarterTicks.All(t => !t.Contains('.')),
+                "power-of-two byte scale prints whole-number quarters",
+                string.Join(" / ", quarterTicks));
+
+            // A near-idle byte peak still gets whole-unit quarters, not three "0 B/s".
+            Check(ChartRenderer.ByteAxisMax(0.6) == 4 && ChartRenderer.ByteAxisMax(3) == 4
+               && ChartRenderer.ByteAxisMax(4) == 4 && ChartRenderer.ByteAxisMax(5) == 8,
+                "tiny byte peaks floor the scale at 4 units",
+                $"0.6->{ChartRenderer.ByteAxisMax(0.6)}, 3->{ChartRenderer.ByteAxisMax(3)}, " +
+                $"5->{ChartRenderer.ByteAxisMax(5)}");
+
+            // The bottom axis label must clear the edit-mode corner bracket, whose arm
+            // reaches CornerSpan into the card; otherwise it is drawn across "0 B".
+            float labelInset = ChartRenderer.AxisLabelInset(editChrome: true, s: 1f);
+            Check(labelInset >= WidgetPainter.CornerSpan
+               && ChartRenderer.AxisLabelInset(editChrome: false, s: 1f) == 0f,
+                "axis labels inset past the corner bracket in edit mode",
+                $"inset {labelInset}px vs bracket {WidgetPainter.CornerSpan}px " +
+                $"(locked {ChartRenderer.AxisLabelInset(editChrome: false, s: 1f)}px)");
+
+            // The label gutter is measured from the labels themselves, so the curve can
+            // never run under a label no matter how wide the unit text gets.
+            var wideModel = BuildSineModel(surface.Width, surface.Height, percent: false, axisMax: 100);
+            Seed(wideModel.Series[0].Data, SeedCount, TestNow + Headroom);
+            Snap(wideModel);
+            byte[] pxWide = GrabModel(wideModel, TestNow, "");
+            var (labelMinX, labelMaxX) = GrayInkX(pxWide, surface.Width, surface.Height, 0, 70, plotTopScan);
+            var (curveMinX, _) = MinMaxAccentX(pxWide, surface.Width, surface.Height, plotTopScan, surface.Height);
+            Check(labelMaxX > 0 && curveMinX > 0 && curveMinX - labelMaxX >= 6,
+                "byte labels stay clear of the curve",
+                $"label ink ends at x={labelMaxX}, curve starts at x={curveMinX} (need >= 6px clear)");
+
+            // ---- 3c. native struct + header geometry proofs --------------------
+            // Every GetPerformanceInfo count field is in pages; one phantom field in
+            // our struct shifted every offset and produced impossible totals.
+            int piSize = Marshal.SizeOf<PERFORMANCE_INFORMATION>();
+            Check(piSize == 104, "PERFORMANCE_INFORMATION matches the native 104-byte layout",
+                $"{piSize} bytes on x64 (a phantom field shifts every reading: total, avail, cache, page size)");
+
+            // HeaderLayout (docs/design.md): the < title > group is centred on the
+            // card, the value is right-anchored, and the gaps are measured ink to ink.
+            {
+                foreach (var (label, valueW) in new[] { ("narrow value", 60f), ("wide RAM value", 110f) })
+                {
+                    var edit = HeaderLayout.Compute(460, titleW: 45, valueW: valueW, editing: true);
+                    // Ink edges: glyph half-extents, not the wider hit boxes.
+                    float nextInkR = edit.Next.X + edit.Next.Width / 2f + WidgetPainter.ChevronGlyphHalf;
+                    float valueGap = edit.Value.Left - nextInkR;
+                    float prevInkR = edit.Prev.X + edit.Prev.Width / 2f + WidgetPainter.ChevronGlyphHalf;
+                    float prevGap = edit.Title.X - prevInkR;
+                    float nextGap = edit.Next.X + edit.Next.Width / 2f - WidgetPainter.ChevronGlyphHalf
+                        - (edit.Title.X + edit.Title.Width - 1f);   // title rect carries a 1px overhang
+                    float groupC = (edit.Prev.X + edit.Next.X + edit.Next.Width) / 2f;
+                    float titleW2 = edit.Title.Width - 1f;
+                    // The value yields: it is fitted into ValueMax and keeps one text
+                    // gap from the centred group instead of pushing the group left.
+                    Check(edit.Value.Width <= edit.ValueMax + 0.01f
+                            && Math.Abs(edit.Value.Width - Math.Min(valueW, edit.ValueMax)) <= 0.01f,
+                        $"value yields to the centred group ({label})",
+                        $"value {edit.Value.Width:0.0}px of {valueW}px, ValueMax {edit.ValueMax:0.0}px");
+                    Check(valueGap >= HeaderLayout.GapText - 0.01f,
+                        $"edit value keeps its gap to the > chevron ({label})",
+                        $"{valueGap:0.0}px ink gap (the RAM 31.01GB overlap was ~0)");
+                    Check(prevGap >= HeaderLayout.ChevGap - 0.01f && nextGap >= HeaderLayout.ChevGap - 0.01f,
+                        $"chevrons keep their ink gap to the title ({label})",
+                        $"< {prevGap:0.0}px / {nextGap:0.0}px >");
+                    Check(Math.Abs(groupC - 230f) <= 1f && Math.Abs(titleW2 - 45f) <= 0.5f,
+                        $"< title > group centers on the card, title intact ({label})",
+                        $"group center {groupC:0.0} vs card center 230.0, title {titleW2:0.0}px of 45px");
+
+                    // The X glyph is the value's right neighbour: it must not be
+                    // drawn under the last digit (the RAM 31.01GB screenshot).
+                    float xInkL = HeaderLayout.BadgeInkLeft(edit.Close);
+                    float badgeGap = xInkL - edit.Value.Right;
+                    Check(badgeGap >= HeaderLayout.GapChrome - 0.01f,
+                        $"edit value clears the X badge ink ({label})",
+                        $"{badgeGap:0.0}px ink gap, X ink starts at {xInkL:0.0} and value ends at {edit.Value.Right:0.0}");
+                }
+
+                // The top-right corner bracket and the check glyph shared pixels; the
+                // badge block now starts one text gap inside the bracket strip.
+                {
+                    var edit = HeaderLayout.Compute(460, titleW: 45, valueW: 110, editing: true);
+                    float checkInkR = edit.Check.X + edit.Check.Width / 2f + WidgetPainter.BadgeGlyphHalf;
+                    float cornerL = 460f - WidgetPainter.CornerSpan;
+                    Check(checkInkR <= cornerL - HeaderLayout.GapText + 0.01f,
+                        "check badge ink clears the corner bracket",
+                        $"check ink ends {checkInkR:0.0}, bracket strip starts {cornerL:0.0}");
+                    Check(edit.Check.Right <= 460f && edit.Close.Left >= 0f,
+                        "badge hit boxes stay inside the card",
+                        $"close [{edit.Close.Left:0.0}..{edit.Close.Right:0.0}] check [{edit.Check.Left:0.0}..{edit.Check.Right:0.0}] on 460px");
+                }
+
+                var locked = HeaderLayout.Compute(460, titleW: 45, valueW: 110, editing: false);
+                Check(locked.Prev.Width == 0 && locked.Next.Width == 0, "locked header has no chevrons",
+                    "chevron boxes are empty when not editing");
+                float lockedGap = locked.Value.Left - (locked.Title.X + locked.Title.Width);
+                Check(lockedGap >= HeaderLayout.GapText - 0.01f, "locked title never nears the value",
+                    $"{lockedGap:0.0}px gap");
+                float lockedC = locked.Title.X + locked.Title.Width / 2f;
+                Check(Math.Abs(lockedC - 230f) <= 1f, "locked title centers on the card",
+                    $"title center {lockedC:0.0} vs card center 230.0");
+            }
 
             Check(surface.Width == 460 && surface.Height == 200, "chart laid out against the real target size",
                 $"surface is {surface.Width}x{surface.Height} and the chart was told the same, not the 420x180 config default");
@@ -651,6 +795,102 @@ public static class SelfTest
                     {
                         try { w?.Destroy(); } catch (Exception ex) { Log.Warn("test widget destroy: " + ex.Message); }
                     }
+
+                    // --- 6e. a telemetry tick wakes a locked widget (freeze regression) ---
+                    // Locked widgets skip frames while the curve is flat, so the tick wakeup is
+                    // what restarts polling. Without it the widget freezes seconds after locking.
+                    DesktopHost? fhost = null;
+                    WidgetWindow? fw = null;
+                    try
+                    {
+                        fhost = new DesktopHost();
+                        fw = new WidgetWindow(fhost, new WidgetConfig
+                        {
+                            Id = "selftest-freeze",
+                            Width = 320,
+                            Height = 140,
+                            Graph = GraphKind.Cpu,
+                            ClickThrough = ClickThroughMode.LeftClickOnly,
+                        });
+                        fw.Create(hwnd);
+                        fhost.TrackWidgetForTest(fw);
+
+                        // Settle: slot capacity draws first, then the flat empty series stalls.
+                        bool stalled = false;
+                        for (int f = 0; f < 5; f++)
+                            if (!fw.RenderFrame(TestNow + 100 + f / 60.0, 1f / 60f)) { stalled = true; break; }
+                        Check(stalled,
+                            "a locked widget with flat data stops presenting (the freeze precondition)",
+                            stalled ? "RenderFrame went false once nothing changed" : "kept drawing with no new data");
+
+                        fhost.Telemetry.SampleNow();
+                        Check(fw.RedrawRequested,
+                            "a telemetry tick requests a redraw on the locked widget",
+                            fw.RedrawRequested ? "Sampled reached the widget" : "tick landed but nobody woke the widget");
+                        bool drew = fw.RenderFrame(TestNow + 101, 1f / 60f);
+                        Check(drew,
+                            "the woken widget presents its next frame",
+                            drew ? "RenderFrame true after the tick" : "still refusing to draw after being woken");
+
+                        // --- 6f. card contact sheet (--capture only) ---
+                        // One capture per GraphKind on real telemetry, locked and edit,
+                        // so every card can be eyeballed instead of assumed correct.
+                        if (captureDir.Length > 0)
+                        {
+                            fw.Destroy();
+                            fw = null;
+                            for (int i = 0; i < 70; i++) fhost.Telemetry.SampleNow();
+                            foreach (GraphKind kind in Enum.GetValues<GraphKind>())
+                            {
+                                WidgetWindow? cw = null;
+                                try
+                                {
+                                    cw = new WidgetWindow(fhost, new WidgetConfig
+                                    {
+                                        Id = "selftest-card-" + kind,
+                                        Width = 460,
+                                        Height = 200,
+                                        Graph = kind,
+                                        ClickThrough = ClickThroughMode.LeftClickOnly,
+                                    });
+                                    cw.Create(hwnd);
+                                    fhost.TrackWidgetForTest(cw);
+                                    // Flip model: the readback carries the previously
+                                    // presented frame, so present twice before capturing.
+                                    for (int f = 0; f < 2; f++)
+                                    {
+                                        cw.RequestRedraw();
+                                        cw.RenderFrame(TestNow + f / 60.0, 1f / 60f);
+                                        cw.CommitComposition();
+                                    }
+                                    cw.Surface!.CaptureToBmp(fhost.Device,
+                                        System.IO.Path.Combine(captureDir, $"30-card-{kind}-locked.bmp"));
+                                    cw.BeginEdit();
+                                    for (int f = 0; f < 2; f++)
+                                    {
+                                        cw.RequestRedraw();
+                                        cw.RenderFrame(TestNow + 0.2 + f / 60.0, 1f / 60f);
+                                        cw.CommitComposition();
+                                    }
+                                    cw.Surface.CaptureToBmp(fhost.Device,
+                                        System.IO.Path.Combine(captureDir, $"30-card-{kind}-edit.bmp"));
+                                    Log.Info($"captured card {kind} (locked + edit)");
+                                }
+                                catch (Exception ex) { Log.Write("ERROR", $"card {kind}: {ex}"); }
+                                finally { try { cw?.Destroy(); } catch { } }
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        failures++;
+                        Log.Write("ERROR", "freeze regression test threw: " + ex);
+                    }
+                    finally
+                    {
+                        try { fw?.Destroy(); } catch (Exception ex) { Log.Warn("freeze test widget destroy: " + ex.Message); }
+                        try { fhost?.Dispose(); } catch (Exception ex) { Log.Warn("freeze test host dispose: " + ex.Message); }
+                    }
                 }
             }
 
@@ -726,6 +966,12 @@ public static class SelfTest
                         $"in use {ChartRenderer.FormatBytes(inUse)}, cached {ChartRenderer.FormatBytes(m.LastCached)}, " +
                         $"committed {ChartRenderer.FormatBytes(m.LastCommitted)} of {ChartRenderer.FormatBytes(total)} " +
                         "(0 or negative would mean GetPerformanceInfo is not being read)");
+                    // Machine-scale guard: page/byte mixups and struct misalignments
+                    // produce megabytes or terabytes on any realistic box.
+                    const long GB = 1024L * 1024 * 1024;
+                    Check(total >= 8 * GB && total <= 128 * GB,
+                        "physical total is a real machine size",
+                        $"{ChartRenderer.FormatBytes(total)} (phantom struct fields once gave terabytes here)");
                 }
 
                 // ---- Disk -------------------------------------------------------------
@@ -848,8 +1094,8 @@ public static class SelfTest
                         double util = 0;
                         _telemetryRead(tel, () =>
                         {
-                            engines = g.Engines.Count;
-                            adapters = g.Adapters.Count;
+                            engines = g.EngineSnapshot().Length;
+                            adapters = g.AdapterSnapshot().Length;
                             util = g.LastUtilization;
                         });
                         detail = $"{engines} engine type(s), {adapters} adapter(s), " +
@@ -865,6 +1111,34 @@ public static class SelfTest
                         Check(!double.IsNaN(util) && util >= 0 && util <= 100,
                             "GPU headline utilisation is a finite 0-100 value", $"{util:0.0}%");
                         Log.Info("gpu: " + detail);
+
+                        // Sampling rebuilds the engine/adapter lists every tick; the render
+                        // thread reads them between ticks. Reading live lists used to throw
+                        // "Collection was modified" mid-frame, which surfaced as a render
+                        // fault. Hammer both sides to prove the reads are safe copies.
+                        string? race = null;
+                        int reads = 0;
+                        using (var done = new ManualResetEventSlim(false))
+                        {
+                            var reader = new Thread(() =>
+                            {
+                                try
+                                {
+                                    while (!done.IsSet)
+                                        foreach (var e in g.EngineSnapshot()) _ = e.Percent;
+                                    foreach (var a in g.AdapterSnapshot()) _ = a.Luid;
+                                }
+                                catch (Exception ex) { race = "reader: " + ex.Message; }
+                                finally { reads++; }
+                            }) { IsBackground = true };
+                            reader.Start();
+                            for (int i = 0; i < 30; i++) { g.Update(TestNow + i); Thread.Sleep(1); }
+                            done.Set();
+                            reader.Join(2000);
+                        }
+                        Check(race is null && reads > 0,
+                            "engine/adapter state is safe to read while sampling rebuilds it",
+                            race ?? $"{reads} reader pass(es) over 30 rebuilds, no torn read");
                     }
 
                     // Temperature, power and fan RPM have no Windows counter at all. The sampler
@@ -993,6 +1267,24 @@ public static class SelfTest
         return maxX < 0 ? (-1, -1) : (minX, maxX);
     }
 
+    /// <summary>
+    /// Min/max column holding a dim gray (axis-label) pixel inside a box; (-1,-1) when
+    /// absent. Axis text is white at 34% over the dark panel, so it reads as gray.
+    /// </summary>
+    static (int minX, int maxX) GrayInkX(byte[] px, int w, int h, int xLo, int xHi, int yLo)
+    {
+        int minX = int.MaxValue, maxX = -1;
+        for (int y = Math.Max(0, yLo); y < h; y++)
+            for (int x = Math.Max(0, xLo); x < Math.Min(w, xHi); x++)
+            {
+                int i = (y * w + x) * 4;
+                byte b = px[i], g = px[i + 1], r = px[i + 2], a = px[i + 3];
+                int lo = Math.Min(b, Math.Min(g, r)), hi = Math.Max(b, Math.Max(g, r));
+                if (a > 100 && hi - lo <= 14 && hi >= 45) { if (x < minX) minX = x; if (x > maxX) maxX = x; }
+            }
+        return maxX < 0 ? (-1, -1) : (minX, maxX);
+    }
+
     /// <summary>Whether any accent pixel sits within (dx, dy) of a point.</summary>
     static bool AccentNear(byte[] px, int w, int h, int x, int y, int dx, int dy)
     {
@@ -1072,15 +1364,16 @@ public static class SelfTest
         return bands;
     }
 
-    static ChartModel BuildSineModel(int w, int h) => new()
+    static ChartModel BuildSineModel(int w, int h, bool percent = true, double axisMax = 100,
+        string valueUnit = "%") => new()
     {
         Title = "CPU",
         Subtitle = "self test",
         Series = [new ChartSeries { Name = "CPU", Data = new TimeSeries(), Color = new Vortice.Mathematics.Color4(0.30f, 0.76f, 1f, 1f), Unit = "%" }],
-        AxisMax = 100,
-        PercentAxis = true,
+        AxisMax = axisMax,
+        PercentAxis = percent,
         ValueText = "42.3",
-        ValueUnit = "%",
+        ValueUnit = valueUnit,
         MinMaxText = "Min 3.1%    Avg 48.0%    Max 97.4%",
         WindowSeconds = 60,
     };

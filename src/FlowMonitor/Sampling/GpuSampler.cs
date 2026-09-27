@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Globalization;
 using FlowMonitor.Graphs;
 using FlowMonitor.Interop;
@@ -28,14 +29,24 @@ public sealed class GpuSampler
     /// <summary>One engine type's utilisation, already summed across processes and devices.</summary>
     public sealed record EngineType(string Name, double Percent);
 
-    public List<EngineType> Engines { get; } = new();
-    public List<Adapter> Adapters { get; } = new();
+    // Rebuilt every tick on the telemetry thread; readers on the render thread get a
+    // copy, so a live rebuild can never invalidate an enumeration mid-frame.
+    readonly object _listGate = new();
+    readonly List<EngineType> _engineTypes = new();
+    readonly List<Adapter> _adapterList = new();
+
+    /// <summary>Engine types as of the last sample, newest state copied out.</summary>
+    public EngineType[] EngineSnapshot() { lock (_listGate) return _engineTypes.ToArray(); }
+
+    /// <summary>Adapters as of the last sample, newest state copied out.</summary>
+    public Adapter[] AdapterSnapshot() { lock (_listGate) return _adapterList.ToArray(); }
 
     /// <summary>Headline utilisation: the busiest engine type, 0-100.</summary>
     public TimeSeries Utilization { get; }
 
     public TimeSeries? EngineSeries(string engineName) => _engineSeries.TryGetValue(engineName, out var s) ? s : null;
-    readonly Dictionary<string, TimeSeries> _engineSeries = new(StringComparer.OrdinalIgnoreCase);
+    // Concurrent: written on the telemetry thread while the render thread looks series up.
+    readonly ConcurrentDictionary<string, TimeSeries> _engineSeries = new(StringComparer.OrdinalIgnoreCase);
 
     public TimeSeries? DedicatedUsedBytes { get; }
     public TimeSeries? SharedUsedBytes { get; }
@@ -117,20 +128,28 @@ public sealed class GpuSampler
         // Zero instances means not yet primed; hold the previous value.
         if (seen == 0) return;
 
-        Engines.Clear();
+        var engineList = new List<EngineType>(byType.Count);
         foreach (var kv in byType)
-            Engines.Add(new EngineType(NormaliseEngineName(kv.Key), kv.Value));
+            engineList.Add(new EngineType(NormaliseEngineName(kv.Key), kv.Value));
 
-        Adapters.Clear();
+        var adapterList = new List<Adapter>(adapters.Count);
         foreach (var kv in adapters.OrderBy(k => k.Key, StringComparer.Ordinal))
-            Adapters.Add(new Adapter { Luid = kv.Key, PhysicalDevice = kv.Value });
+            adapterList.Add(new Adapter { Luid = kv.Key, PhysicalDevice = kv.Value });
+
+        lock (_listGate)
+        {
+            _engineTypes.Clear();
+            _engineTypes.AddRange(engineList);
+            _adapterList.Clear();
+            _adapterList.AddRange(adapterList);
+        }
 
         // Engine names include numbered Compute units; fold them into one bar.
         LastUtilization = Math.Clamp(byType.Values.DefaultIfEmpty(0).Max(), 0, 100);
         _tel.Add(Utilization, now, (float)LastUtilization);
 
         // Keep one series per engine type so a per-engine graph has history, not just a snapshot.
-        foreach (var e in Engines)
+        foreach (var e in engineList)
         {
             if (!_engineSeries.TryGetValue(e.Name, out var s))
             {

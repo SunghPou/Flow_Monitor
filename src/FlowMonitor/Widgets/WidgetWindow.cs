@@ -20,7 +20,7 @@ public enum ResizeEdge
 public sealed class WidgetWindow
 {
     public const int ResizeBorder = 7;
-    public const int CheckMarkSize = 30;
+    public const int CheckMarkSize = (int)HeaderLayout.BadgeBox;   // badge hit box, also the glyph size
 
     readonly Host.IRenderHost _host;
     WidgetSurface? _surface;
@@ -481,24 +481,18 @@ public sealed class WidgetWindow
         return ResizeEdge.None;
     }
 
-    const int BadgeTop = 7;         // logical px from the widget top to the badge top
-    const int BadgeRightGap = 8;    // logical px from the badge's right edge to the widget's right edge
-    const int BadgeSpacing = 6;     // logical px between the two badges
-    public const int MetricArrowSize = 26;   // logical px hit box for the metric switcher chevrons
-    const int MetricArrowOffset = 58;        // logical px from widget centre to chevron centre
+    // Last painted chevron boxes in logical px; paint and hit-test share HeaderLayout.
+    System.Drawing.RectangleF _prevMetricRect, _nextMetricRect;
 
     /// <summary>
     /// Edit-mode badge rects in logical px relative to widget top-left. Single definition for
-    /// hit-test and painter; painter scales by Dpi.
+    /// hit-test, painter and the header value's right edge (HeaderLayout).
     /// </summary>
     internal static System.Drawing.RectangleF CheckBadgeRect(int widgetWidthLogical)
-        => new(widgetWidthLogical - CheckMarkSize - BadgeRightGap, BadgeTop, CheckMarkSize, CheckMarkSize);
+        => HeaderLayout.BadgeRects(widgetWidthLogical).Check;
 
     internal static System.Drawing.RectangleF CloseBadgeRect(int widgetWidthLogical)
-    {
-        int right = (int)CheckBadgeRect(widgetWidthLogical).Left - BadgeSpacing;
-        return new System.Drawing.RectangleF(right - CheckMarkSize, BadgeTop, CheckMarkSize, CheckMarkSize);
-    }
+        => HeaderLayout.BadgeRects(widgetWidthLogical).Close;
 
     bool IsInCheckMark(int x, int y)
     {
@@ -514,33 +508,28 @@ public sealed class WidgetWindow
     }
 
     /// <summary>
-    /// Metric switcher rects in logical px, centred on the widget middle. Single definition
-    /// for hit-test and painter; painter scales by Dpi.
+    /// Metric switcher rects from the last painted frame (HeaderLayout). Empty before
+    /// the first frame; edit mode always paints before it accepts clicks.
     /// </summary>
-    internal static System.Drawing.RectangleF PrevMetricBadgeRect(int widgetWidthLogical)
-        => new(widgetWidthLogical / 2f - MetricArrowOffset - MetricArrowSize / 2f, BadgeTop,
-            MetricArrowSize, MetricArrowSize);
-
-    internal static System.Drawing.RectangleF NextMetricBadgeRect(int widgetWidthLogical)
-        => new(widgetWidthLogical / 2f + MetricArrowOffset - MetricArrowSize / 2f, BadgeTop,
-            MetricArrowSize, MetricArrowSize);
+    internal System.Drawing.RectangleF PrevMetricRect => _prevMetricRect;
+    internal System.Drawing.RectangleF NextMetricRect => _nextMetricRect;
 
     bool IsInPrevMetric(int x, int y)
     {
-        System.Drawing.RectangleF r = PrevMetricBadgeRect(_width);
-        return x >= r.Left && x < r.Right && y >= r.Top && y < r.Bottom;
+        var r = _prevMetricRect;
+        return r.Width > 0 && x >= r.Left && x < r.Right && y >= r.Top && y < r.Bottom;
     }
 
     bool IsInNextMetric(int x, int y)
     {
-        System.Drawing.RectangleF r = NextMetricBadgeRect(_width);
-        return x >= r.Left && x < r.Right && y >= r.Top && y < r.Bottom;
+        var r = _nextMetricRect;
+        return r.Width > 0 && x >= r.Left && x < r.Right && y >= r.Top && y < r.Bottom;
     }
 
     static readonly GraphKind[] MetricCycle =
     [
         GraphKind.Cpu, GraphKind.CpuCores, GraphKind.Memory, GraphKind.Disk,
-        GraphKind.Network, GraphKind.Gpu, GraphKind.GpuCores,
+        GraphKind.Network, GraphKind.Gpu, GraphKind.GpuCores, GraphKind.Vram,
     ];
 
     /// <summary>Next supported metric in the cycle, wrapping around.</summary>
@@ -664,10 +653,20 @@ public sealed class WidgetWindow
 
         var model = _host.BuildChart(Config, now);
 
-        // Reserve header space for badges so value shifts left; follows _checkAmount animation.
-        model.HeaderReserveRight = _checkAmount > 0.001f
-            ? (CheckMarkSize * 2f + 14f) * Config.Dpi
-            : 0f;
+        // Edit chrome flag plus the header layout for this frame; the chevron boxes
+        // stored here are what the hit test uses, so clicks land where paint drew.
+        model.EditChrome = editing;
+        {
+            var res = _host.Resources;
+            string valueText = Config.ShowUnits && !string.IsNullOrEmpty(model.ValueUnit)
+                ? model.ValueText + " " + model.ValueUnit
+                : model.ValueText;
+            float titleW = res.Measure(model.Title, res.Title, Config.Dpi).Width / Config.Dpi;
+            float valueW = res.Measure(valueText, res.HeaderValue, Config.Dpi).Width / Config.Dpi;
+            var layout = HeaderLayout.Compute(_width, titleW, valueW, editing);
+            _prevMetricRect = layout.Prev;
+            _nextMetricRect = layout.Next;
+        }
         var dc = surface.Context;
         // Paint against surface real pixel size; _width/_height are logical units.
         // RENDER THREAD: apply pending resize before reading size and BeginDraw.
@@ -681,7 +680,8 @@ public sealed class WidgetWindow
         _charts.Draw(dc, Config, model, Config.Dpi * 96f, now, surface.Width, surface.Height);
         WidgetPainter.PaintCloseButton(dc, _host.Resources, Config, w, h, _checkAmount, _closeHover);
         WidgetPainter.PaintCheckMark(dc, _host.Resources, Config, w, h, _checkAmount, _checkHover);
-        if (editing) WidgetPainter.PaintMetricArrows(dc, _host.Resources, Config, w, h, _checkAmount);
+        if (editing) WidgetPainter.PaintMetricArrows(dc, _host.Resources, Config, w, h, _checkAmount,
+            _prevMetricRect, _nextMetricRect);
         if (editing) WidgetPainter.PaintResizeAffordance(dc, _host.Resources, Config, w, h, _hoverAmount);
         surface.EndDrawAndPresent();
 
