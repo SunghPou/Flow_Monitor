@@ -526,10 +526,19 @@ public sealed class WidgetWindow
         return r.Width > 0 && x >= r.Left && x < r.Right && y >= r.Top && y < r.Bottom;
     }
 
+    // One card per metric the user needs. GpuCores is not offered: the Gpu card already
+    // shows actual engine usage, and a second GPU card split the meaning in two.
+    /// <summary>Cards the user can pick, in menu order. Excludes retired enum members.</summary>
+    internal static readonly GraphKind[] CardSheetKinds =
+    [
+        GraphKind.Cpu, GraphKind.CpuCores, GraphKind.Memory, GraphKind.Disk,
+        GraphKind.Network, GraphKind.Gpu, GraphKind.Fans, GraphKind.Vram,
+    ];
+
     static readonly GraphKind[] MetricCycle =
     [
         GraphKind.Cpu, GraphKind.CpuCores, GraphKind.Memory, GraphKind.Disk,
-        GraphKind.Network, GraphKind.Gpu, GraphKind.GpuCores, GraphKind.Vram,
+        GraphKind.Network, GraphKind.Gpu, GraphKind.Vram,
     ];
 
     /// <summary>Next supported metric in the cycle, wrapping around.</summary>
@@ -682,7 +691,8 @@ public sealed class WidgetWindow
         WidgetPainter.PaintCheckMark(dc, _host.Resources, Config, w, h, _checkAmount, _checkHover);
         if (editing) WidgetPainter.PaintMetricArrows(dc, _host.Resources, Config, w, h, _checkAmount,
             _prevMetricRect, _nextMetricRect);
-        if (editing) WidgetPainter.PaintResizeAffordance(dc, _host.Resources, Config, w, h, _hoverAmount);
+        if (editing) WidgetPainter.PaintResizeAffordance(dc, _host.Resources, Config, w, h,
+            _hoverAmount, _charts.HasAxisLabelColumn(model));
         surface.EndDrawAndPresent();
 
         _redrawRequested = false;

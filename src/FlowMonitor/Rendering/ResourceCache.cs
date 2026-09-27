@@ -26,6 +26,9 @@ public sealed class ResourceCache : IDisposable
     public ID2D1StrokeStyle RoundStroke { get; }
     public ID2D1StrokeStyle Hairline { get; }
 
+    /// <summary>Dashed companion lines, e.g. a committed-bytes line over a filled area.</summary>
+    public ID2D1StrokeStyle DashStroke { get; }
+
     public ResourceCache(RenderDevice device)
     {
         _device = device;
@@ -59,6 +62,17 @@ public sealed class ResourceCache : IDisposable
             StartCap = CapStyle.Flat,
             EndCap = CapStyle.Flat,
             LineJoin = LineJoin.Miter,
+            TransformType = StrokeTransformType.Fixed,
+        });
+
+        DashStroke = device.D2DFactory.CreateStrokeStyle(new StrokeStyleProperties1
+        {
+            StartCap = CapStyle.Flat,
+            EndCap = CapStyle.Flat,
+            DashCap = CapStyle.Square,
+            LineJoin = LineJoin.Round,
+            MiterLimit = 2f,
+            DashStyle = DashStyle.Dash,
             TransformType = StrokeTransformType.Fixed,
         });
     }
@@ -101,6 +115,7 @@ public sealed class ResourceCache : IDisposable
         _formats.Clear();
         _measureCache.Clear();
         RoundStroke.Dispose();
+        DashStroke.Dispose();
         Hairline.Dispose();
     }
 }

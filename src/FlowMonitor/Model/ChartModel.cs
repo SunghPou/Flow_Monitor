@@ -20,6 +20,11 @@ public sealed class ChartSeries
     public bool Fill { get; init; } = true;
     /// <summary>Secondary series (no fill, thinner) such as 'cached' or 'send'.</summary>
     public bool Secondary { get; init; }
+    /// <summary>
+    /// Dashed stroke, so a companion line never reads as a second border of the filled
+    /// area it runs along (MC draws its committed dataset dashed).
+    /// </summary>
+    public bool Dashed { get; init; }
 }
 
 /// <summary>Everything the renderer needs to draw one chart for one frame.</summary>
@@ -39,6 +44,8 @@ public sealed class ChartModel
     public string ValueText { get; init; } = "";
     public string ValueUnit { get; init; } = "";
     public string MinMaxText { get; init; } = "";
+    /// <summary>Reason shown dim in the plot centre when there is nothing to plot.</summary>
+    public string EmptyText { get; init; } = "";
 
     public double WindowSeconds { get; init; } = 60.0;
 

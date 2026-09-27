@@ -4,16 +4,18 @@ using Vortice.DirectWrite;
 using Vortice.Mathematics;
 using Color4 = Vortice.Mathematics.Color4;
 using RectF = System.Drawing.RectangleF;
+using SizeF = System.Drawing.SizeF;
 using V2 = System.Numerics.Vector2;
 
 namespace FlowMonitor.Rendering;
 
 /// <summary>
 /// Draws a Task-Manager-style performance chart onto a Direct2D device context.
-/// Slot-indexed (MC parity): 600 fixed slots, index 0 newest, gliding in from one slot
-/// past the right edge per sample interval; history shifts exactly one slot per tick,
-/// never with the frame clock. NaN slots render as gaps. Smoothing is a monotone cubic
-/// with horizontal tangents through every sample (no overshoot, apex stays on its slot).
+/// Slot-indexed (MC parity): the newest VisiblePoints samples spread across the plot
+/// width, index 0 newest, gliding in from one slot past the right edge per sample
+/// interval; history shifts exactly one slot per tick, never with the frame clock.
+/// NaN slots render as gaps. Smoothing is a monotone cubic with horizontal tangents
+/// through every sample (no overshoot, apex stays on its slot).
 /// The renderer also tracks whether the produced frame is pixel-identical to the previous
 /// one, which is how the widget reaches near-zero GPU cost while a curve is flat.
 /// </summary>
@@ -43,6 +45,7 @@ public sealed class ChartRenderer
     static readonly Color4 ValueText = new(1f, 1f, 1f, 1f);
     static readonly Color4 MinMaxText = new(1f, 1f, 1f, 0.42f);
     static readonly Color4 PeakLine = new(1f, 1f, 1f, 0.28f);
+    static readonly Color4 EmptyHint = new(1f, 1f, 1f, 0.30f);
 
     /// <summary>RectF (System.Drawing) -> Vortice.Mathematics.Rect, which is what the draw calls take.</summary>
     static Rect R(RectF r) => new(r);
@@ -120,15 +123,15 @@ public sealed class ChartRenderer
         // sit outside the plot, never clip, and the curve never runs under them; percent
         // axes draw no labels and span the full width.
         string[] axisLabels = ShowsAxisLabels(model, axisMax) ? AxisLabels(model, axisMax) : [];
-        float gutter = 0f, labelInset = 0f;
+        float gutter = 0f;
         if (axisLabels.Length > 0)
         {
-            // In edit mode the bottom-left corner bracket reaches CornerSpan into the card,
-            // so the label column starts past it; otherwise the bracket arm crosses "0 B".
-            labelInset = AxisLabelInset(model.EditChrome, s);
+            // The column always starts at the card inset, locked or editing: a label that
+            // shifts between modes reads as the card moving under the user. The bottom-left
+            // corner bracket yields to the column instead (PaintResizeAffordance).
             foreach (string label in axisLabels)
                 gutter = Math.Max(gutter, _res.Measure(label, _res.AxisRight, s).Width
-                    + Widgets.HeaderLayout.GapText * s + labelInset);
+                    + Widgets.HeaderLayout.GapText * s);
             plotLeft += gutter;
         }
 
@@ -171,7 +174,17 @@ public sealed class ChartRenderer
         finally { dc.PopAxisAlignedClip(); }
 
         // Axis labels outside the plot, painted after the curves.
-        DrawAxisLabels(dc, plot, axisLabels, gutter, labelInset, s);
+        DrawAxisLabels(dc, plot, axisLabels, gutter, s);
+
+        // Empty state: a dim reason centred in the plot, so a card with nothing to
+        // plot never reads as a broken widget.
+        if (model.EmptyText.Length > 0)
+        {
+            SizeF h = _res.Measure(model.EmptyText, _res.Micro, s);
+            var eRect = new RectF(plot.Left + (plot.Width - h.Width) / 2f,
+                plot.Top + (plot.Height - h.Height) / 2f, h.Width, h.Height);
+            dc.DrawText(model.EmptyText, _res.Micro, R(eRect), _res.Brush(EmptyHint));
+        }
 
         if (_slots.Count > model.Series.Count) _frameChanged = true;
 
@@ -211,9 +224,15 @@ public sealed class ChartRenderer
             }
 
             bool primary = !series.Secondary;
-            float width = Math.Max(0.75f, cfg.LineThickness * s * (primary ? 1f : 0.75f));
-            DrawRuns(dc, cfg, slot.Points, slots, plot, series.Color, width,
-                series.Fill && primary ? cfg.FillOpacity / model.Series.Count : 0f);
+            float width = Math.Max(0.75f, cfg.LineThickness * s * (primary ? 1f : 0.7f));
+            // Companion lines are dimmed and thinned so they read as data over the filled
+            // area, never as a second border drawn along its edge.
+            var color = series.Secondary
+                ? new Color4(series.Color.R, series.Color.G, series.Color.B, 0.5f)
+                : series.Color;
+            DrawRuns(dc, cfg, slot.Points, slots, plot, color, width,
+                series.Fill && primary ? cfg.FillOpacity / model.Series.Count : 0f,
+                bottom: null, dashed: series.Dashed);
 
             slot.FrontIsA = !slot.FrontIsA;
             if (changed) _frameChanged = true;
@@ -355,8 +374,7 @@ public sealed class ChartRenderer
     /// vertically centred on its gridline. Only byte axes reach here; percent axes
     /// return early in <see cref="ShowsAxisLabels"/>.
     /// </summary>
-    void DrawAxisLabels(ID2D1DeviceContext dc, RectF plot, string[] labels, float gutter,
-        float labelInset, float s)
+    void DrawAxisLabels(ID2D1DeviceContext dc, RectF plot, string[] labels, float gutter, float s)
     {
         if (gutter <= 0f) return;
         var fmt = _res.AxisRight;
@@ -364,8 +382,8 @@ public sealed class ChartRenderer
         {
             float y = plot.Bottom - (float)(plot.Height * (i / 4.0));
             // GapText separates label ink from the plot, per docs/design.md.
-            var r = new RectF(plot.Left - gutter + labelInset, y - 7f * s,
-                gutter - Widgets.HeaderLayout.GapText * s - labelInset, 14f * s);
+            var r = new RectF(plot.Left - gutter, y - 7f * s,
+                gutter - Widgets.HeaderLayout.GapText * s, 14f * s);
             dc.DrawText(labels[i], fmt, R(r), _res.Brush(AxisText));
         }
     }
@@ -390,6 +408,9 @@ public sealed class ChartRenderer
     }
 
     // ------------------------------------------------------------------ curves
+
+    // Dashes come from a cached stroke style (ResourceCache.DashStroke), so the pattern
+    // costs nothing per frame and matches how MC strokes its dashed datasets.
 
     // ------------------------------------------------------------------ slot runs
 
@@ -420,7 +441,7 @@ public sealed class ChartRenderer
     /// break the run, so gaps stay empty instead of bridging fabricated lines.
     /// </summary>
     void DrawRuns(ID2D1DeviceContext dc, WidgetConfig cfg, V2[] pts, int count, RectF plot,
-        Color4 color, float width, float fillOpacity, V2[]? bottom = null)
+        Color4 color, float width, float fillOpacity, V2[]? bottom = null, bool dashed = false)
     {
         var brush = _res.Brush(color);
         int i = 0;
@@ -441,7 +462,7 @@ public sealed class ChartRenderer
 
             var line = cfg.Smoothing ? SmoothRun(pts, start, m) : SliceRun(pts, start, m);
             using (var geom = BuildPolyline(line, FigureBegin.Hollow))
-                dc.DrawGeometry(geom, brush, width, _res.RoundStroke);
+                dc.DrawGeometry(geom, brush, width, dashed ? _res.DashStroke : _res.RoundStroke);
 
             if (fillOpacity > 0.001f)
             {
@@ -568,12 +589,12 @@ public sealed class ChartRenderer
     internal static double ByteAxisMax(double peak) => Math.Max(4, RoundUpPow2(peak));
 
     /// <summary>
-    /// Left inset of the axis-label column. Edit-mode corner brackets reach
-    /// <see cref="Widgets.WidgetPainter.CornerSpan"/> into the card, so labels start
-    /// past them instead of being crossed by a bracket arm.
+    /// True when this frame paints a left axis-label column, which owns the bottom-left
+    /// corner of the plot. The label column never moves between locked and edit mode, so
+    /// the edit-mode corner bracket yields to it instead (docs/design.md).
     /// </summary>
-    internal static float AxisLabelInset(bool editChrome, float s)
-        => editChrome ? (Widgets.WidgetPainter.CornerSpan + Widgets.HeaderLayout.GapText) * s : 0f;
+    public bool HasAxisLabelColumn(ChartModel model)
+        => ShowsAxisLabels(model, model.AutoRange ? ComputeAutoMax(model) : model.AxisMax);
 
     /// <summary>
     /// Fits the header value into maxW: the full text, then the same number with

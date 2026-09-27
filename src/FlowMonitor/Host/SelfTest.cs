@@ -397,6 +397,25 @@ public static class SelfTest
             Check(byteBands >= 5, "byte axis still draws all five labels",
                 $"{byteBands} text bands from y={plotTopScan} (expected 5)");
 
+            // A card with nothing to plot shows its reason dim in the plot centre,
+            // so an empty card never reads as a broken widget.
+            var emptyModel = new ChartModel
+            {
+                Title = "Fans",
+                Subtitle = "",
+                Series = [],
+                AxisMax = 100,
+                ValueText = "--",
+                EmptyText = "no fan sensor on this machine",
+            };
+            byte[] pxEmpty = GrabModel(emptyModel, TestNow, Cap("07-empty-hint"));
+            int hintPixels = CountPixels(pxEmpty, surface.Width, surface.Height,
+                x => x > surface.Width / 2 - 110 && x < surface.Width / 2 + 110,
+                y => y > surface.Height / 2 - 4 && y < surface.Height / 2 + 24,
+                (r, g, b) => r > 40 && g > 40 && b > 40);
+            Check(hintPixels >= 10, "empty card shows its reason in the plot centre",
+                $"{hintPixels} dim ink pixels around the centre (a blank plot would be 0)");
+
             // Byte labels carry their unit on every tick, so no gridline reads as a
             // bare number; rate axes append the per-second unit. FormatBytes is
             // 1024-based, like MC's to_human_readable_nice.
@@ -439,14 +458,23 @@ public static class SelfTest
                 $"0.6->{ChartRenderer.ByteAxisMax(0.6)}, 3->{ChartRenderer.ByteAxisMax(3)}, " +
                 $"5->{ChartRenderer.ByteAxisMax(5)}");
 
-            // The bottom axis label must clear the edit-mode corner bracket, whose arm
-            // reaches CornerSpan into the card; otherwise it is drawn across "0 B".
-            float labelInset = ChartRenderer.AxisLabelInset(editChrome: true, s: 1f);
-            Check(labelInset >= WidgetPainter.CornerSpan
-               && ChartRenderer.AxisLabelInset(editChrome: false, s: 1f) == 0f,
-                "axis labels inset past the corner bracket in edit mode",
-                $"inset {labelInset}px vs bracket {WidgetPainter.CornerSpan}px " +
-                $"(locked {ChartRenderer.AxisLabelInset(editChrome: false, s: 1f)}px)");
+            // The label column is chrome-free: entering edit mode must not shift it, or the
+            // whole card reads as moving sideways. Measured from rendered pixels.
+            {
+                var columnModel = BuildSineModel(surface.Width, surface.Height, percent: false, axisMax: 100);
+                Seed(columnModel.Series[0].Data, SeedCount, TestNow + Headroom);
+                Snap(columnModel);
+                columnModel.EditChrome = false;
+                var (lockedLeft, _) = GrayInkX(GrabModel(columnModel, TestNow, ""),
+                    surface.Width, surface.Height, 0, 70, plotTopScan);
+                columnModel.EditChrome = true;
+                var (editLeft, _) = GrayInkX(GrabModel(columnModel, TestNow, ""),
+                    surface.Width, surface.Height, 0, 70, plotTopScan);
+                Check(lockedLeft > 0 && lockedLeft == editLeft,
+                    "the axis-label column does not move in edit mode",
+                    $"label ink starts at x={lockedLeft} locked and x={editLeft} editing " +
+                    "(any difference reads as the card shifting under the user)");
+            }
 
             // The label gutter is measured from the labels themselves, so the curve can
             // never run under a label no matter how wide the unit text gets.
@@ -840,7 +868,7 @@ public static class SelfTest
                             fw.Destroy();
                             fw = null;
                             for (int i = 0; i < 70; i++) fhost.Telemetry.SampleNow();
-                            foreach (GraphKind kind in Enum.GetValues<GraphKind>())
+                            foreach (GraphKind kind in WidgetWindow.CardSheetKinds)
                             {
                                 WidgetWindow? cw = null;
                                 try

@@ -79,7 +79,11 @@ public static class WidgetStore
                 try
                 {
                     var cfg = JsonSerializer.Deserialize<WidgetConfig>(File.ReadAllText(file), Options);
-                    if (cfg is not null) result.Add(cfg);
+                    if (cfg is null) continue;
+                    // Saved configs keep enum values stable, so a widget saved on the retired
+                    // per-engine GPU card comes back as the single GPU card.
+                    if (cfg.Graph == GraphKind.GpuCores) cfg.Graph = GraphKind.Gpu;
+                    result.Add(cfg);
                 }
                 catch (Exception ex)
                 {

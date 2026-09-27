@@ -926,6 +926,9 @@ public sealed class DesktopHost : IRenderHost, IDisposable
                 });
                 if (total <= 0) total = 1;
 
+                // MC parity (performance_page/memory.rs): one filled 'in use' area plus
+                // unfilled companion lines, all on the fixed mem_total scale. Not stacked:
+                // stacked bands read as unrelated layers instead of one memory picture.
                 return new ChartModel
                 {
                     Title = "RAM",
@@ -933,10 +936,9 @@ public sealed class DesktopHost : IRenderHost, IDisposable
                     Series =
                     [
                         new ChartSeries { Name = "In use", Data = mem.InUse, Color = accent },
-                        new ChartSeries { Name = "Cached", Data = mem.Cached, Color = new Color4(0.36f, 0.62f, 0.85f, 1f) },
-                        new ChartSeries { Name = "Available", Data = mem.Available, Color = new Color4(0.20f, 0.30f, 0.38f, 1f) },
+                        new ChartSeries { Name = "Cached", Data = mem.Cached, Color = new Color4(0.36f, 0.62f, 0.85f, 1f), Fill = false, Secondary = true },
+                        new ChartSeries { Name = "Committed", Data = mem.Committed, Color = new Color4(0.62f, 0.72f, 0.84f, 1f), Fill = false, Secondary = true, Dashed = true },
                     ],
-                    Stacked = true,
                     AxisMax = total,
                     // Byte axis with labels: values are bytes, not 0-100.
                     PercentAxis = false,
@@ -1197,11 +1199,16 @@ public sealed class DesktopHost : IRenderHost, IDisposable
             default:
                 return new ChartModel
                 {
-                    Title = cfg.Graph.ToString(),
-                    Subtitle = "sampler pending",
+                    // A saved per-core config that is still waiting for samples must not
+                    // be called "GPU": the metric is the card, and per-core is a Cpu view.
+                    Title = cfg.Graph == GraphKind.GpuCores ? "CPU" : cfg.Graph.ToString(),
+                    Subtitle = "",
                     Series = [],
                     AxisMax = 100,
                     ValueText = "--",
+                    EmptyText = cfg.Graph == GraphKind.Fans
+                        ? "no fan sensor on this machine"
+                        : "waiting for the sampler",
                 };
         }
     }

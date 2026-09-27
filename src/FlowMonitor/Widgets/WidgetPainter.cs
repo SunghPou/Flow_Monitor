@@ -146,8 +146,13 @@ public static class WidgetPainter
         }
     }
 
+    /// <summary>
+    /// Edit-mode corner brackets. <paramref name="skipBottomLeft"/> hands the bottom-left
+    /// corner to the chart's axis-label column, which sits at the card inset and must not
+    /// move between locked and edit mode (docs/design.md).
+    /// </summary>
     public static void PaintResizeAffordance(ID2D1DeviceContext dc, ResourceCache res, WidgetConfig cfg,
-        float width, float height, float hover)
+        float width, float height, float hover, bool skipBottomLeft = false)
     {
         float s = cfg.Dpi;
         float len = CornerLen * s;
@@ -157,7 +162,7 @@ public static class WidgetPainter
 
         DrawCorner(dc, brush, w, inset, inset, len, 1, 1);
         DrawCorner(dc, brush, w, width - inset, inset, len, -1, 1);
-        DrawCorner(dc, brush, w, inset, height - inset, len, 1, -1);
+        if (!skipBottomLeft) DrawCorner(dc, brush, w, inset, height - inset, len, 1, -1);
         DrawCorner(dc, brush, w, width - inset, height - inset, len, -1, -1);
     }
 
