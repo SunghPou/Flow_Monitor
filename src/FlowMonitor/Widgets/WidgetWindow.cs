@@ -500,7 +500,7 @@ public sealed class WidgetWindow
         return x >= r.Left && x < r.Right && y >= r.Top && y < r.Bottom;
     }
 
-    /// <summary>X badge immediately left of the checkmark; separate hit box.</summary>
+    /// <summary>X badge in the top-left corner, mirrored against the check.</summary>
     bool IsInCloseButton(int x, int y)
     {
         System.Drawing.RectangleF r = CloseBadgeRect(_width);

@@ -526,24 +526,51 @@ public static class SelfTest
                         $"< title > group centers on the card, title intact ({label})",
                         $"group center {groupC:0.0} vs card center 230.0, title {titleW2:0.0}px of 45px");
 
-                    // The X glyph is the value's right neighbour: it must not be
+                    // The check glyph is the value's right neighbour: it must not be
                     // drawn under the last digit (the RAM 31.01GB screenshot).
-                    float xInkL = HeaderLayout.BadgeInkLeft(edit.Close);
-                    float badgeGap = xInkL - edit.Value.Right;
+                    float checkInkL = HeaderLayout.BadgeInkLeft(edit.Check);
+                    float badgeGap = checkInkL - edit.Value.Right;
                     Check(badgeGap >= HeaderLayout.GapChrome - 0.01f,
-                        $"edit value clears the X badge ink ({label})",
-                        $"{badgeGap:0.0}px ink gap, X ink starts at {xInkL:0.0} and value ends at {edit.Value.Right:0.0}");
+                        $"edit value clears the check badge ink ({label})",
+                        $"{badgeGap:0.0}px ink gap, check ink starts at {checkInkL:0.0} and value ends at {edit.Value.Right:0.0}");
+
+                    // The X in the left corner is the centred group's left neighbour.
+                    float xInkR = HeaderLayout.BadgeInkRight(edit.Close);
+                    float groupInkL = edit.Prev.X + edit.Prev.Width / 2f - WidgetPainter.ChevronGlyphHalf;
+                    Check(groupInkL - xInkR >= HeaderLayout.GapChrome - 0.01f,
+                        $"< group clears the X badge ink ({label})",
+                        $"{groupInkL - xInkR:0.0}px ink gap, X ink ends at {xInkR:0.0} and the group starts at {groupInkL:0.0}");
+                }
+
+                // X in the top-left corner, check in the top-right, mirrored from the
+                // same inset: neither hugs the edge and the pair is symmetrical.
+                {
+                    var edit = HeaderLayout.Compute(460, titleW: 45, valueW: 110, editing: true);
+                    float xC = edit.Close.X + edit.Close.Width / 2f;
+                    float cC = edit.Check.X + edit.Check.Width / 2f;
+                    float xInkL = HeaderLayout.BadgeInkLeft(edit.Close);
+                    float checkInkR = HeaderLayout.BadgeInkRight(edit.Check);
+                    Check(Math.Abs((xC + cC) - 460f) <= 0.01f && Math.Abs(edit.Close.Y - edit.Check.Y) <= 0.01f,
+                        "X and check are mirror-symmetric about the card centre",
+                        $"X glyph x {xC:0.0}, check glyph x {cC:0.0} on 460px (centres must sum to the width)");
+                    Check(Math.Abs(xInkL - HeaderLayout.BadgeClear) <= 0.01f
+                            && Math.Abs((460f - checkInkR) - HeaderLayout.BadgeClear) <= 0.01f,
+                        "both badges sit one bracket + text gap inside their corner",
+                        $"X ink {xInkL:0.0} from the left, check ink {460f - checkInkR:0.0} from the right (BadgeClear {HeaderLayout.BadgeClear:0.0})");
+                    Check(edit.Prev.X >= edit.Close.Right - 0.01f && edit.Next.Right <= edit.Check.X + 0.01f,
+                        "chevron hit boxes never reach the badge boxes",
+                        $"prev [{edit.Prev.X:0.0}..{edit.Prev.Right:0.0}] vs X [{edit.Close.X:0.0}..{edit.Close.Right:0.0}], next [{edit.Next.X:0.0}..{edit.Next.Right:0.0}] vs check [{edit.Check.X:0.0}..{edit.Check.Right:0.0}]");
                 }
 
                 // The top-right corner bracket and the check glyph shared pixels; the
                 // badge block now starts one text gap inside the bracket strip.
                 {
                     var edit = HeaderLayout.Compute(460, titleW: 45, valueW: 110, editing: true);
-                    float checkInkR = edit.Check.X + edit.Check.Width / 2f + WidgetPainter.BadgeGlyphHalf;
+                    float checkInkR2 = HeaderLayout.BadgeInkRight(edit.Check);
                     float cornerL = 460f - WidgetPainter.CornerSpan;
-                    Check(checkInkR <= cornerL - HeaderLayout.GapText + 0.01f,
+                    Check(checkInkR2 <= cornerL - HeaderLayout.GapText + 0.01f,
                         "check badge ink clears the corner bracket",
-                        $"check ink ends {checkInkR:0.0}, bracket strip starts {cornerL:0.0}");
+                        $"check ink ends {checkInkR2:0.0}, bracket strip starts {cornerL:0.0}");
                     Check(edit.Check.Right <= 460f && edit.Close.Left >= 0f,
                         "badge hit boxes stay inside the card",
                         $"close [{edit.Close.Left:0.0}..{edit.Close.Right:0.0}] check [{edit.Check.Left:0.0}..{edit.Check.Right:0.0}] on 460px");
@@ -894,10 +921,19 @@ public static class SelfTest
                                     cw.Surface!.CaptureToBmp(fhost.Device,
                                         System.IO.Path.Combine(captureDir, $"30-card-{kind}-locked.bmp"));
                                     cw.BeginEdit();
+                                    // The edit fade runs on dt (8/s), so a couple of 1/60
+                                    // frames would freeze the badges at their first
+                                    // sliver. Pump realistic frames until it is full.
+                                    for (int f = 0; f < 8; f++)
+                                    {
+                                        cw.RequestRedraw();
+                                        cw.RenderFrame(TestNow + 0.2 + f * 0.05, 0.05f);
+                                        cw.CommitComposition();
+                                    }
                                     for (int f = 0; f < 2; f++)
                                     {
                                         cw.RequestRedraw();
-                                        cw.RenderFrame(TestNow + 0.2 + f / 60.0, 1f / 60f);
+                                        cw.RenderFrame(TestNow + 0.6 + f / 60.0, 1f / 60f);
                                         cw.CommitComposition();
                                     }
                                     cw.Surface.CaptureToBmp(fhost.Device,

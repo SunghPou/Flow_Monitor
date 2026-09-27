@@ -12,7 +12,7 @@ insets). Anyone touching widget chrome follows this file.
 | `GapText` | 8 | min gap between two text elements |
 | `GapChrome` | 12 | min gap between text and any badge/glyph |
 | `BadgeBox` | 30 | X / checkmark hit box (square) |
-| `BadgeGap` | 8 | gap between the two right badges |
+| `BadgeClear` | 24.5 | card edge to badge ink: corner bracket + `GapText` |
 | `ChevBox` | 26 | metric chevron hit box (square) |
 | `ChevGap` | 8 | gap between chevron and title |
 | `RowCenter` | 19 | the single optical center of the header row |
@@ -28,10 +28,13 @@ insets). Anyone touching widget chrome follows this file.
    title. The value yields width (`FitValue`) instead of moving the centre.
 4. Minimum gaps are structural: `GapText` text-to-text, `GapChrome`
    text-to-chrome. Layout clamps by construction; no overlap is possible.
-5. Badges sit at the right inset; the value clears their ink by `GapChrome`,
-   and the check glyph clears the corner bracket by `GapText`.
+5. The X owns the top-left corner and the check the top-right one, mirrored
+   about the card's centre line from the same `BadgeClear` inset, so the pair
+   is symmetrical and neither hugs the edge. The value clears the check ink by
+   `GapChrome` and the centered group clears the X ink by `GapChrome`.
 6. Paint and hit-test share one definition (`HeaderLayout`); a glyph is
-   clickable exactly where it is drawn.
+   clickable exactly where it is drawn. A chevron box may be shortened by a
+   clamp, never slid off its glyph.
 7. Layout is binary (edit vs locked); only opacity animates. Positions never
    drift mid-fade.
 

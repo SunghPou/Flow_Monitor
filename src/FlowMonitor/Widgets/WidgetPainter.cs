@@ -80,7 +80,7 @@ public static class WidgetPainter
     }
 
     /// <summary>
-    /// X badge left of the checkmark with the same ease. Glyph only; glyph differs.
+    /// X badge in the top-left corner with the same ease as the check. Glyph only.
     /// </summary>
     public static void PaintCloseButton(ID2D1DeviceContext dc, ResourceCache res, WidgetConfig cfg,
         float width, float height, float amount, float hover = 0f)
