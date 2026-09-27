@@ -12,10 +12,15 @@ insets). Anyone touching widget chrome follows this file.
 | `GapText` | 8 | min gap between two text elements |
 | `GapChrome` | 12 | min gap between text and any badge/glyph |
 | `BadgeBox` | 30 | X / checkmark hit box (square) |
-| `BadgeClear` | 24.5 | card edge to badge ink: corner bracket + `GapText` |
+| `BadgeGlyphHalf` | 6.14 | badge ink half-width, stroke included; what every reserve measures |
+| `BadgeClear` | 24.5 | min card edge to badge ink: corner bracket + `GapText` |
+| `MinAnchor` | 36.7 | floor for the X anchor: `BadgeClear` + one full glyph |
 | `ChevBox` | 26 | metric chevron hit box (square) |
 | `ChevGap` | 8 | gap between chevron and title |
 | `RowCenter` | 19 | the single optical center of the header row |
+
+A reserve is always a real ink edge (`BadgeGlyphHalf`, not the hit box): anchoring
+to a box would leave the glyph visibly short of the line it is meant to sit on.
 
 ## Header rules
 
@@ -27,16 +32,20 @@ insets). Anyone touching widget chrome follows this file.
    card: the title is centered, and the group's ink is symmetric about the
    title. The value yields width (`FitValue`) instead of moving the centre.
 4. Minimum gaps are structural: `GapText` text-to-text, `GapChrome`
-   text-to-chrome. Layout clamps by construction; no overlap is possible.
-5. The X owns the top-left corner and the check the top-right one, mirrored
-   about the card's centre line from the same `BadgeClear` inset, so the pair
-   is symmetrical and neither hugs the edge. The value clears the check ink by
-   `GapChrome` and the centered group clears the X ink by `GapChrome`.
-6. Paint and hit-test share one definition (`HeaderLayout`); a glyph is
-   clickable exactly where it is drawn. A chevron box may be shortened by a
-   clamp, never slid off its glyph.
-7. Layout is binary (edit vs locked); only opacity animates. Positions never
-   drift mid-fade.
+   text-to-chrome. Ink that is *reserved* can never be overlapped; a hit box may
+   overhang into a gap (invisible), and only a card too narrow to centre the
+   group clips the title.
+5. The X heads the axis tick column: its ink ends on the column's right edge,
+   never closer to the card edge than `MinAnchor`, and never past the card's
+   centre line. The check is the mirror image of that placement, so the pair is
+   symmetrical on any card. The value clears the check ink by `GapChrome` and
+   the centered group clears the X ink by `GapChrome`.
+6. Paint and hit-test share one definition (`HeaderLayout`): the rects used to
+   paint are the rects used to hit-test, taken from the last painted frame. A
+   hit box may be shortened by a clamp, never slid off its glyph.
+7. Layout is binary (edit vs locked). Only opacity and glyph scale animate:
+   every centre, anchor and gap is fixed for the whole fade, and a glyph grows
+   about its own centre.
 
 ## Axis rules
 
@@ -45,6 +54,7 @@ insets). Anyone touching widget chrome follows this file.
    be misread as a bare number.
 10. Byte scales are powers of two (Mission Center's `RoundingSettings::Pow2`),
     floored at 4 units, so the quarters print as whole numbers. Fixed-scale
-    byte axes (RAM, VRAM) use the real total instead.
-11. The label column is sized from the labels themselves and is inset past the
-    edit-mode corner bracket, so a bracket arm can never cross a tick.
+    byte axes with a fixed scale (RAM) use the real total instead of rounding.
+11. The label column is sized from the labels themselves and never moves
+    between locked and edit mode; the bottom-left corner bracket yields to it
+    instead, so a bracket arm can never cross a tick.

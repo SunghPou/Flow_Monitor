@@ -18,8 +18,17 @@ public static class WidgetPainter
 
     /// <summary>Badge glyph half-extent as a fraction of its box, at full ease.</summary>
     public const float BadgeInk = 0.32f;
-    /// <summary>Drawn half-width of a badge glyph in logical px (HeaderLayout reserves this).</summary>
-    public static readonly float BadgeGlyphHalf = WidgetWindow.CheckMarkSize * BadgeInk;
+    /// <summary>How far a badge glyph reaches from its centre, as a fraction of the box.</summary>
+    public const float BadgeArm = 0.46f;
+    /// <summary>Badge stroke width as a fraction of the box.</summary>
+    public const float BadgeStroke = 0.115f;
+    /// <summary>
+    /// Drawn half-width of a badge glyph in logical px at full ease, stroke included.
+    /// HeaderLayout reserves exactly this, so a badge is anchored on its real ink.
+    /// </summary>
+    public static readonly float BadgeGlyphHalf =
+        WidgetWindow.CheckMarkSize * BadgeInk * BadgeArm
+        + Math.Max(2f, WidgetWindow.CheckMarkSize * BadgeStroke) / 2f;
     /// <summary>Drawn half-width of a metric chevron in logical px at full ease.</summary>
     public const float ChevronGlyphHalf = 6f;
     /// <summary>Corner bracket inset from the card edge, in logical px.</summary>
@@ -46,19 +55,19 @@ public static class WidgetPainter
 
     /// <summary>
     /// Confirm badge: glyph only, no disc. Hover brightens the glyph; edit fade via amount.
+    /// The box comes from the window's HeaderLayout, shared with the hit test.
     /// </summary>
     public static void PaintCheckMark(ID2D1DeviceContext dc, ResourceCache res, WidgetConfig cfg,
-        float width, float height, float amount, float hover = 0f)
+        float width, float height, System.Drawing.RectangleF boxLogical, float amount,
+        float hover = 0f)
     {
-        if (amount <= 0.01f) return;
+        if (amount <= 0.01f || boxLogical.Width <= 0) return;
         float s = cfg.Dpi;
         float ease = Ease(amount);
-        // Placement from WidgetWindow.CheckBadgeRect, shared with the hit test.
         // Shrink anchored to rect centre so ease-in does not walk the badge.
-        int logicalW = (int)MathF.Round(width / s);
-        RectF lr = WidgetWindow.CheckBadgeRect(logicalW);
         float size = WidgetWindow.CheckMarkSize * s * (0.70f + 0.30f * ease);
-        var center = new V2((lr.Left + lr.Width * 0.5f) * s, (lr.Top + lr.Height * 0.5f) * s);
+        var center = new V2((boxLogical.Left + boxLogical.Width * 0.5f) * s,
+            (boxLogical.Top + boxLogical.Height * 0.5f) * s);
         float sc = 0.5f + 0.5f * ease;
 
         dc.PushAxisAlignedClip(new RectF(0, 0, width, height), AntialiasMode.Aliased);
@@ -68,9 +77,9 @@ public static class WidgetPainter
         float r = size * BadgeInk;
         var p0 = new V2(center.X - r * 0.44f, center.Y + r * 0.02f);
         var p1 = new V2(center.X - r * 0.11f, center.Y + r * 0.35f);
-        var p2 = new V2(center.X + r * 0.46f, center.Y - r * 0.36f);
+        var p2 = new V2(center.X + r * BadgeArm, center.Y - r * 0.36f);
 
-        float w = Math.Max(2f, size * 0.115f);
+        float w = Math.Max(2f, size * BadgeStroke);
         var glyph = res.Brush(new Color4(1f, 1f, 1f, amount * (0.5f + 0.5f * hover)));
         dc.DrawLine(p0, p1, glyph, w, res.RoundStroke);
         dc.DrawLine(p1, p2, glyph, w, res.RoundStroke);
@@ -80,20 +89,19 @@ public static class WidgetPainter
     }
 
     /// <summary>
-    /// X badge in the top-left corner with the same ease as the check. Glyph only.
+    /// X badge at the head of the tick column with the same ease as the check. Glyph only.
     /// </summary>
     public static void PaintCloseButton(ID2D1DeviceContext dc, ResourceCache res, WidgetConfig cfg,
-        float width, float height, float amount, float hover = 0f)
+        float width, float height, System.Drawing.RectangleF boxLogical, float amount,
+        float hover = 0f)
     {
-        if (amount <= 0.01f) return;
+        if (amount <= 0.01f || boxLogical.Width <= 0) return;
         float s = cfg.Dpi;
         float ease = Ease(amount);
-        // Derived from WidgetWindow.CloseBadgeRect, shared with the hit test.
-        int logicalW = (int)MathF.Round(width / s);
-        RectF lr = WidgetWindow.CloseBadgeRect(logicalW);
         float size = WidgetWindow.CheckMarkSize * s * (0.70f + 0.30f * ease);
 
-        var center = new V2((lr.Left + lr.Width * 0.5f) * s, (lr.Top + lr.Height * 0.5f) * s);
+        var center = new V2((boxLogical.Left + boxLogical.Width * 0.5f) * s,
+            (boxLogical.Top + boxLogical.Height * 0.5f) * s);
         float sc = 0.5f + 0.5f * ease;
 
         dc.PushAxisAlignedClip(new RectF(0, 0, width, height), AntialiasMode.Aliased);
@@ -101,8 +109,8 @@ public static class WidgetPainter
 
         // ✕ glyph: two crossing round-capped strokes; only brightness reacts to hover.
         float r = size * BadgeInk;
-        float w = Math.Max(2f, size * 0.115f);
-        float d = r * 0.46f;
+        float w = Math.Max(2f, size * BadgeStroke);
+        float d = r * BadgeArm;
         var glyph = res.Brush(new Color4(1f, 1f, 1f, amount * (0.5f + 0.5f * hover)));
         dc.DrawLine(new V2(center.X - d, center.Y - d), new V2(center.X + d, center.Y + d), glyph, w, res.RoundStroke);
         dc.DrawLine(new V2(center.X - d, center.Y + d), new V2(center.X + d, center.Y - d), glyph, w, res.RoundStroke);

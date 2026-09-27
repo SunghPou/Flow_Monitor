@@ -70,6 +70,46 @@ public sealed class ChartRenderer
         _res = res;
     }
 
+    /// <summary>Plot area in device px, its tick strings and the resolved axis maximum.</summary>
+    public readonly record struct PlotGeom(RectF Rect, string[] Labels, double AxisMax,
+        float LabelColumnX)
+    {
+        public bool HasLabels => Labels.Length > 0;
+    }
+
+    /// <summary>
+    /// The plot area, its ticks and the axis maximum. Byte axes reserve a left gutter
+    /// sized to their own widest label so the labels sit outside the plot and the curve
+    /// never runs under them; percent axes draw no labels and span the full width.
+    /// LabelColumnX (logical px) is where the tick column ends: the header anchors the
+    /// X badge to it, so the badge and the values share one vertical line
+    /// (docs/design.md header rule 5).
+    /// </summary>
+    public PlotGeom Geometry(WidgetConfig cfg, ChartModel model, float s, float width, float height)
+    {
+        float pad = 12f * s;
+        // plotTop clears the title/value row; the subtitle slot stays empty air.
+        float plotTop = cfg.ShowLabels ? 50f * s : pad;
+        float plotRight = width - pad;
+        float plotBottom = height - pad;
+        if (cfg.ShowMinMax && height > 120f * s) plotBottom -= 14f * s;
+        double axisMax = model.AutoRange ? ComputeAutoMax(model) : model.AxisMax;
+        if (axisMax <= 0) axisMax = 100;
+
+        // The column always starts at the card inset, locked or editing: a label that
+        // shifts between modes reads as the card moving under the user. The bottom-left
+        // corner bracket yields to the column instead (PaintResizeAffordance).
+        string[] labels = ShowsAxisLabels(model, axisMax) ? AxisLabels(model, axisMax) : [];
+        float plotLeft = pad;
+        foreach (string label in labels)
+            plotLeft = Math.Max(plotLeft, pad
+                + _res.Measure(label, _res.AxisRight, s).Width
+                + Widgets.HeaderLayout.GapText * s);
+
+        var rect = new RectF(plotLeft, plotTop, plotRight - plotLeft, plotBottom - plotTop);
+        return new PlotGeom(rect, labels, axisMax, plotLeft / s);
+    }
+
     /// <summary>
     /// Draws the chart. Target size is passed explicitly; cfg holds the configured
     /// size, which may disagree with the actual render target.
@@ -80,12 +120,13 @@ public sealed class ChartRenderer
         _frameChanged = false;
         float s = dpi / 96f;
         var bounds = new RectF(0, 0, width, height);
+        var geo = Geometry(cfg, model, s, width, height);
 
         // ---------------------------------------------------------------- header
         // Title + value only, laid out by HeaderLayout (docs/design.md): the
         // < title > group is centred on the card, the value is right-anchored, and
-        // the title yields width so the two can never touch.
-        float pad = 12f * s;
+        // the title yields width so the two can never touch. The badges anchor to the
+        // tick column, so the X lines up with the axis values.
         if (cfg.ShowLabels)
         {
             string text = !cfg.ShowUnits || string.IsNullOrEmpty(model.ValueUnit)
@@ -95,7 +136,8 @@ public sealed class ChartRenderer
             float titleW = _res.Measure(model.Title, _res.Title, s).Width / s;
             float valueW = _res.Measure(text, _res.HeaderValue, s).Width / s;
             float logicalW = bounds.Width / s;
-            var header = Widgets.HeaderLayout.Compute(logicalW, titleW, valueW, model.EditChrome);
+            var header = Widgets.HeaderLayout.Compute(logicalW, titleW, valueW, model.EditChrome,
+                geo.LabelColumnX);
 
             var titleRect = new RectF(header.Title.X * s, header.Title.Y * s,
                 header.Title.Width * s, header.Title.Height * s);
@@ -109,35 +151,13 @@ public sealed class ChartRenderer
         }
 
         // ---------------------------------------------------------------- plot rect
-        // plotTop clears the title/value row; the subtitle slot stays empty air.
-        float plotTop = cfg.ShowLabels ? 50f * s : pad;
-        float plotLeft = pad;
-        float plotRight = bounds.Width - pad;
-        float plotBottom = bounds.Height - pad;
-        if (cfg.ShowMinMax && bounds.Height > 120f * s)
-            plotBottom -= 14f * s;
-        double axisMax = model.AutoRange ? ComputeAutoMax(model) : model.AxisMax;
-        if (axisMax <= 0) axisMax = 100;
-
-        // Byte axes reserve a left gutter sized to their own widest label, so the labels
-        // sit outside the plot, never clip, and the curve never runs under them; percent
-        // axes draw no labels and span the full width.
-        string[] axisLabels = ShowsAxisLabels(model, axisMax) ? AxisLabels(model, axisMax) : [];
-        float gutter = 0f;
-        if (axisLabels.Length > 0)
-        {
-            // The column always starts at the card inset, locked or editing: a label that
-            // shifts between modes reads as the card moving under the user. The bottom-left
-            // corner bracket yields to the column instead (PaintResizeAffordance).
-            foreach (string label in axisLabels)
-                gutter = Math.Max(gutter, _res.Measure(label, _res.AxisRight, s).Width
-                    + Widgets.HeaderLayout.GapText * s);
-            plotLeft += gutter;
-        }
-
-        // RectangleF is (x, y, width, height).
-        var plot = new RectF(plotLeft, plotTop, plotRight - plotLeft, plotBottom - plotTop);
+        // RectangleF is (x, y, width, height). The gutter is the label column the
+        // geometry reserved; labels are drawn into it below.
+        var plot = geo.Rect;
+        float gutter = plot.Left - 12f * s;
         if (plot.Width < 8f || plot.Height < 8f) return;
+        double axisMax = geo.AxisMax;
+        string[] axisLabels = geo.Labels;
 
         // ---------------------------------------------------------------- gridlines
         // Labels are painted after the curves so the curve never strikes through them.
@@ -191,7 +211,7 @@ public sealed class ChartRenderer
         // ---------------------------------------------------------------- min / max
         if (cfg.ShowMinMax && model.Series.Count > 0 && bounds.Height > 120f * s)
         {
-            var mmRect = new RectF(pad, plotBottom + 1f * s, bounds.Width - pad * 2f, 13f * s);
+            var mmRect = new RectF(12f * s, plot.Bottom + 1f * s, bounds.Width - 24f * s, 13f * s);
             dc.DrawText(model.MinMaxText, _res.Micro, R(mmRect), _res.Brush(MinMaxText));
         }
     }

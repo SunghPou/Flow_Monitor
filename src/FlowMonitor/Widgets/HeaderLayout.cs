@@ -4,10 +4,10 @@ namespace FlowMonitor.Widgets;
 
 /// <summary>
 /// Header geometry in logical px. Single definition for paint and hit-test
-/// (docs/design.md). The X sits in the top-left corner and the check in the
-/// top-right, mirrored about the card centre; the &lt; title &gt; group is centred,
-/// the value is right-anchored, and the gaps are measured glyph edge to glyph
-/// edge: a hit box may overhang into its neighbour's gap, because only ink is seen.
+/// (docs/design.md). The X's ink ends on the tick column, the check mirrors it about
+/// the card centre; the &lt; title &gt; group is centred, the value is right-anchored, and
+/// the gaps are measured glyph edge to glyph edge: a hit box may overhang into its
+/// neighbour's gap, because only ink is seen.
 /// </summary>
 public readonly record struct HeaderLayout(RectF Value, RectF Title, RectF Prev, RectF Next,
     RectF Close, RectF Check, float ValueMax)
@@ -16,10 +16,12 @@ public readonly record struct HeaderLayout(RectF Value, RectF Title, RectF Prev,
     public const float GapText = 8f;      // min ink gap, text to text
     public const float GapChrome = 12f;   // min ink gap, text to chrome glyph
     public const float BadgeBox = 30f;    // X / check hit box (square, WidgetWindow.CheckMarkSize)
-    // Card edge to each badge's glyph ink: the corner bracket owns the outermost
-    // strip, so the badges start one text gap inside it. Both edges use this same
-    // inset, which is what makes the pair mirror-symmetric.
+    // Smallest card edge to badge ink: the corner bracket owns the outermost strip, so
+    // the badges start one text gap inside it.
     public const float BadgeClear = WidgetPainter.CornerSpan + GapText;
+    // The X glyph's ink ends on this x, so the badge sits in the column of tick values
+    // when the card has them, and one badge width clear of the bracket when it does not.
+    public static readonly float MinAnchor = BadgeClear + WidgetPainter.BadgeGlyphHalf * 2f;
     public const float ChevBox = 26f;     // metric chevron hit box (square)
     public const float ChevGap = 8f;      // chevron hit box to title ink
     public const float RowCenter = 19f;   // the one optical center of the row
@@ -27,15 +29,18 @@ public readonly record struct HeaderLayout(RectF Value, RectF Title, RectF Prev,
     const float ValueH = 26f;
 
     /// <summary>
-    /// The X (left corner) and check (right corner) hit boxes, mirrored about the
-    /// card's vertical centre line. Single definition for paint, hit-test and the
-    /// reserves the value and the centred group keep off them.
+    /// The X (left) and check (right) hit boxes. The X glyph's ink ends on anchorX — the
+    /// tick column's right edge — and the check mirrors that distance about the card's
+    /// centre line, so both sit the same distance from their edge. anchorX is clamped to
+    /// <see cref="MinAnchor"/> and to the card's half width.
     /// </summary>
-    public static (RectF Close, RectF Check) BadgeRects(float logicalW)
+    public static (RectF Close, RectF Check) BadgeRects(float logicalW, float anchorX)
     {
-        float center = BadgeClear + WidgetPainter.BadgeGlyphHalf;
-        return (new RectF(center - BadgeBox / 2f, RowCenter - BadgeBox / 2f, BadgeBox, BadgeBox),
-                new RectF(logicalW - center - BadgeBox / 2f, RowCenter - BadgeBox / 2f, BadgeBox, BadgeBox));
+        float a = Math.Clamp(anchorX, MinAnchor, Math.Max(MinAnchor, logicalW / 2f));
+        float xCenter = a - WidgetPainter.BadgeGlyphHalf;
+        float checkCenter = logicalW - xCenter;
+        return (new RectF(xCenter - BadgeBox / 2f, RowCenter - BadgeBox / 2f, BadgeBox, BadgeBox),
+                new RectF(checkCenter - BadgeBox / 2f, RowCenter - BadgeBox / 2f, BadgeBox, BadgeBox));
     }
 
     /// <summary>Left edge of a badge glyph's ink: the box pad plus the glyph half.</summary>
@@ -56,15 +61,17 @@ public readonly record struct HeaderLayout(RectF Value, RectF Title, RectF Prev,
     }
 
     /// <summary>
-    /// Lays out the header. titleW/valueW are measured text widths. The &lt; title &gt;
-    /// group is centred on the card and never yields; the value is right-anchored and
-    /// fitted into <see cref="ValueMax"/> (the renderer shortens or ellipsizes it), so a
-    /// wide value can no longer drag the group off centre. Only a card too narrow to
-    /// centre the group at all clips the title.
+    /// Lays out the header. titleW/valueW are measured text widths, anchorX the tick
+    /// column's right edge (0 when the card has no labels). The &lt; title &gt; group is
+    /// centred on the card and never yields; the value is right-anchored and fitted into
+    /// <see cref="ValueMax"/> (the renderer shortens or ellipsizes it), so a wide value can
+    /// no longer drag the group off centre. Only a card too narrow to centre the group at
+    /// all clips the title.
     /// </summary>
-    public static HeaderLayout Compute(float logicalW, float titleW, float valueW, bool editing)
+    public static HeaderLayout Compute(float logicalW, float titleW, float valueW, bool editing,
+        float anchorX = 0f)
     {
-        var (close, check) = editing ? BadgeRects(logicalW) : (RectF.Empty, RectF.Empty);
+        var (close, check) = editing ? BadgeRects(logicalW, anchorX) : (RectF.Empty, RectF.Empty);
 
         // The group = [<] gap title gap [>]; each chevron reserves ChevGap plus its
         // glyph half beyond the title, so the ink group is symmetric about the title.

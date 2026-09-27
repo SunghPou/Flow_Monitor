@@ -481,30 +481,24 @@ public sealed class WidgetWindow
         return ResizeEdge.None;
     }
 
-    // Last painted chevron boxes in logical px; paint and hit-test share HeaderLayout.
-    System.Drawing.RectangleF _prevMetricRect, _nextMetricRect;
+    // Last painted chevron and badge boxes in logical px; paint and hit-test share HeaderLayout.
+    System.Drawing.RectangleF _prevMetricRect, _nextMetricRect, _closeRect, _checkRect;
 
-    /// <summary>
-    /// Edit-mode badge rects in logical px relative to widget top-left. Single definition for
-    /// hit-test, painter and the header value's right edge (HeaderLayout).
-    /// </summary>
-    internal static System.Drawing.RectangleF CheckBadgeRect(int widgetWidthLogical)
-        => HeaderLayout.BadgeRects(widgetWidthLogical).Check;
-
-    internal static System.Drawing.RectangleF CloseBadgeRect(int widgetWidthLogical)
-        => HeaderLayout.BadgeRects(widgetWidthLogical).Close;
+    /// <summary>Badge rects from the last painted frame (HeaderLayout).</summary>
+    internal System.Drawing.RectangleF CloseBadgeRect => _closeRect;
+    internal System.Drawing.RectangleF CheckBadgeRect => _checkRect;
 
     bool IsInCheckMark(int x, int y)
     {
-        System.Drawing.RectangleF r = CheckBadgeRect(_width);
-        return x >= r.Left && x < r.Right && y >= r.Top && y < r.Bottom;
+        System.Drawing.RectangleF r = _checkRect;
+        return r.Width > 0 && x >= r.Left && x < r.Right && y >= r.Top && y < r.Bottom;
     }
 
-    /// <summary>X badge in the top-left corner, mirrored against the check.</summary>
+    /// <summary>X badge at the head of the tick column, mirrored against the check.</summary>
     bool IsInCloseButton(int x, int y)
     {
-        System.Drawing.RectangleF r = CloseBadgeRect(_width);
-        return x >= r.Left && x < r.Right && y >= r.Top && y < r.Bottom;
+        System.Drawing.RectangleF r = _closeRect;
+        return r.Width > 0 && x >= r.Left && x < r.Right && y >= r.Top && y < r.Bottom;
     }
 
     /// <summary>
@@ -662,9 +656,13 @@ public sealed class WidgetWindow
 
         var model = _host.BuildChart(Config, now);
 
-        // Edit chrome flag plus the header layout for this frame; the chevron boxes
-        // stored here are what the hit test uses, so clicks land where paint drew.
+        // Edit chrome flag plus the header layout for this frame; the chevron and badge
+        // Edit chrome flag plus the header layout for this frame; the chevron and badge
+        // boxes stored here are what the hit test uses, so clicks land where paint drew.
+        // RENDER THREAD: apply pending resize before reading the surface size, so the
+        // header and the chart lay out against the size actually being painted.
         model.EditChrome = editing;
+        surface.ApplyPendingResize();
         {
             var res = _host.Resources;
             string valueText = Config.ShowUnits && !string.IsNullOrEmpty(model.ValueUnit)
@@ -672,14 +670,17 @@ public sealed class WidgetWindow
                 : model.ValueText;
             float titleW = res.Measure(model.Title, res.Title, Config.Dpi).Width / Config.Dpi;
             float valueW = res.Measure(valueText, res.HeaderValue, Config.Dpi).Width / Config.Dpi;
-            var layout = HeaderLayout.Compute(_width, titleW, valueW, editing);
+            // The badges ride the tick column, so the header needs the plot geometry too.
+            float anchorX = _charts.Geometry(Config, model, Config.Dpi, surface.Width, surface.Height)
+                .LabelColumnX;
+            var layout = HeaderLayout.Compute(_width, titleW, valueW, editing, anchorX);
             _prevMetricRect = layout.Prev;
             _nextMetricRect = layout.Next;
+            _closeRect = layout.Close;
+            _checkRect = layout.Check;
         }
         var dc = surface.Context;
         // Paint against surface real pixel size; _width/_height are logical units.
-        // RENDER THREAD: apply pending resize before reading size and BeginDraw.
-        surface.ApplyPendingResize();
         float w = surface.Width, h = surface.Height;
 
         surface.BeginDraw(Config.Dpi * 96f);
@@ -687,8 +688,8 @@ public sealed class WidgetWindow
         dc.Clear(new Vortice.Mathematics.Color4(0f, 0f, 0f, 0f));
         WidgetPainter.PaintBackground(dc, _host.Resources, Config, w, h, _hoverAmount, _checkAmount, editing);
         _charts.Draw(dc, Config, model, Config.Dpi * 96f, now, surface.Width, surface.Height);
-        WidgetPainter.PaintCloseButton(dc, _host.Resources, Config, w, h, _checkAmount, _closeHover);
-        WidgetPainter.PaintCheckMark(dc, _host.Resources, Config, w, h, _checkAmount, _checkHover);
+        WidgetPainter.PaintCloseButton(dc, _host.Resources, Config, w, h, _closeRect, _checkAmount, _closeHover);
+        WidgetPainter.PaintCheckMark(dc, _host.Resources, Config, w, h, _checkRect, _checkAmount, _checkHover);
         if (editing) WidgetPainter.PaintMetricArrows(dc, _host.Resources, Config, w, h, _checkAmount,
             _prevMetricRect, _nextMetricRect);
         if (editing) WidgetPainter.PaintResizeAffordance(dc, _host.Resources, Config, w, h,

@@ -173,7 +173,8 @@ public static class SelfTest
                     new WidgetConfig { CornerRadius = 8, Transparency = 12 }, surface.Width, surface.Height,
                     hover: 0f, checkAmount: 1f, editing: true);
                 WidgetPainter.PaintCheckMark(dc, resources,
-                    new WidgetConfig { CornerRadius = 8 }, surface.Width, surface.Height, 1f);
+                    new WidgetConfig { CornerRadius = 8 }, surface.Width, surface.Height,
+                    HeaderLayout.BadgeRects(460f, 0f).Check, 1f);
             });
 
             // ---- 3b. SLOT-STABILITY PROOF ------------------------------------
@@ -196,6 +197,26 @@ public static class SelfTest
             }
 
             byte[] Grab(double now, string path) => GrabModel(sine, now, path);
+
+            /// <summary>Renders a frame with the edit badges painted at hover brightness.</summary>
+            byte[] GrabBadges(ChartModel model, HeaderLayout badges)
+            {
+                surface.BeginDraw(96f);
+                surface.Context.Clear(new Vortice.Mathematics.Color4(0, 0, 0, 0));
+                var cfg = new WidgetConfig();
+                WidgetPainter.PaintBackground(surface.Context, resources, cfg, surface.Width,
+                    surface.Height, hover: 0f, checkAmount: 1f, editing: true);
+                chart.Draw(surface.Context, cfg, model, 96f, TestNow, surface.Width, surface.Height);
+                WidgetPainter.PaintCloseButton(surface.Context, resources, cfg, surface.Width,
+                    surface.Height, badges.Close, 1f, hover: 1f);
+                WidgetPainter.PaintCheckMark(surface.Context, resources, cfg, surface.Width,
+                    surface.Height, badges.Check, 1f, hover: 1f);
+                surface.EndDrawOnly();
+                var px = surface.CaptureToPixels(device);
+                surface.Present();
+                surface.Commit(device);
+                return px;
+            }
 
             void Check(bool ok, string label, string detail)
             {
@@ -476,6 +497,31 @@ public static class SelfTest
                     "(any difference reads as the card shifting under the user)");
             }
 
+            // The X badge rides the tick column: the glyph's right edge lands on the same x
+            // the tick values end at, so the badge reads as the head of that column.
+            // Measured from rendered pixels, with the badge painted at hover brightness so
+            // only it clears the 200+ white threshold.
+            {
+                var badgeModel = BuildSineModel(surface.Width, surface.Height, percent: false, axisMax: 100);
+                Seed(badgeModel.Series[0].Data, SeedCount, TestNow + Headroom);
+                Snap(badgeModel);
+                badgeModel.EditChrome = true;
+                var plotRect = chart.Geometry(new WidgetConfig(), badgeModel, 1f, surface.Width,
+                    surface.Height).Rect;
+                var badges = HeaderLayout.Compute(surface.Width, 45f, 60f, editing: true,
+                    plotRect.Left);
+                var (xInkL, xInkR) = BrightInkX(GrabBadges(badgeModel, badges),
+                    surface.Width, surface.Height, 0, (int)plotRect.Left + 8,
+                    (int)(HeaderLayout.RowCenter - 14f), (int)(HeaderLayout.RowCenter + 14f));
+                Check(xInkR > 0 && Math.Abs(xInkR - plotRect.Left) <= 2,
+                    "X badge ink ends on the tick column",
+                    $"X ink spans x={xInkL}..{xInkR}px, tick values end at x={plotRect.Left:0.0}px " +
+                    "(the badge should head that column, not float in the corner)");
+                Check(xInkL > WidgetPainter.CornerSpan,
+                    "X badge ink still clears the corner bracket",
+                    $"X ink starts at x={xInkL}, bracket strip ends at x={WidgetPainter.CornerSpan:0.0}");
+            }
+
             // The label gutter is measured from the labels themselves, so the curve can
             // never run under a label no matter how wide the unit text gets.
             var wideModel = BuildSineModel(surface.Width, surface.Height, percent: false, axisMax: 100);
@@ -542,8 +588,8 @@ public static class SelfTest
                         $"{groupInkL - xInkR:0.0}px ink gap, X ink ends at {xInkR:0.0} and the group starts at {groupInkL:0.0}");
                 }
 
-                // X in the top-left corner, check in the top-right, mirrored from the
-                // same inset: neither hugs the edge and the pair is symmetrical.
+                // With no tick column (percent axes) both badges keep their floor inset,
+                // mirrored about the card centre.
                 {
                     var edit = HeaderLayout.Compute(460, titleW: 45, valueW: 110, editing: true);
                     float xC = edit.Close.X + edit.Close.Width / 2f;
@@ -555,11 +601,24 @@ public static class SelfTest
                         $"X glyph x {xC:0.0}, check glyph x {cC:0.0} on 460px (centres must sum to the width)");
                     Check(Math.Abs(xInkL - HeaderLayout.BadgeClear) <= 0.01f
                             && Math.Abs((460f - checkInkR) - HeaderLayout.BadgeClear) <= 0.01f,
-                        "both badges sit one bracket + text gap inside their corner",
+                        "no tick column: both badges sit one bracket + text gap inside their corner",
                         $"X ink {xInkL:0.0} from the left, check ink {460f - checkInkR:0.0} from the right (BadgeClear {HeaderLayout.BadgeClear:0.0})");
                     Check(edit.Prev.X >= edit.Close.Right - 0.01f && edit.Next.Right <= edit.Check.X + 0.01f,
                         "chevron hit boxes never reach the badge boxes",
                         $"prev [{edit.Prev.X:0.0}..{edit.Prev.Right:0.0}] vs X [{edit.Close.X:0.0}..{edit.Close.Right:0.0}], next [{edit.Next.X:0.0}..{edit.Next.Right:0.0}] vs check [{edit.Check.X:0.0}..{edit.Check.Right:0.0}]");
+                }
+
+                // The X rides the tick column: its ink ends on the column's right edge and
+                // the check takes the same distance from the other edge (docs/design.md 5).
+                foreach (float anchor in new[] { 43.7f, 60f, 96f })
+                {
+                    var edit = HeaderLayout.Compute(460, titleW: 45, valueW: 110, editing: true, anchorX: anchor);
+                    float xInkR = HeaderLayout.BadgeInkRight(edit.Close);
+                    float checkInkL = HeaderLayout.BadgeInkLeft(edit.Check);
+                    Check(Math.Abs(xInkR - Math.Max(anchor, HeaderLayout.MinAnchor)) <= 0.01f
+                            && Math.Abs((460f - checkInkL) - xInkR) <= 0.01f,
+                        $"X ink ends on the tick column, check mirrors it (anchor {anchor:0.0})",
+                        $"X ink ends {xInkR:0.0}, check ink starts {checkInkL:0.0} ({(460f - checkInkL):0.0} from the right edge)");
                 }
 
                 // The top-right corner bracket and the check glyph shared pixels; the
@@ -1345,6 +1404,24 @@ public static class SelfTest
                 byte b = px[i], g = px[i + 1], r = px[i + 2], a = px[i + 3];
                 int lo = Math.Min(b, Math.Min(g, r)), hi = Math.Max(b, Math.Max(g, r));
                 if (a > 100 && hi - lo <= 14 && hi >= 45) { if (x < minX) minX = x; if (x > maxX) maxX = x; }
+            }
+        return maxX < 0 ? (-1, -1) : (minX, maxX);
+    }
+
+    /// <summary>
+    /// Min/max column holding a full-brightness white (badge glyph at hover) pixel inside
+    /// a box; (-1,-1) when absent. Only the hover-brightened badge reaches 200+, so the
+    /// header text and axis labels cannot be mistaken for it.
+    /// </summary>
+    static (int minX, int maxX) BrightInkX(byte[] px, int w, int h, int xLo, int xHi, int yLo, int yHi)
+    {
+        int minX = int.MaxValue, maxX = -1;
+        for (int y = Math.Max(0, yLo); y < Math.Min(h, yHi); y++)
+            for (int x = Math.Max(0, xLo); x < Math.Min(w, xHi); x++)
+            {
+                int i = (y * w + x) * 4;
+                if (px[i + 3] > 200 && px[i + 2] > 200 && px[i + 1] > 200 && px[i] > 200)
+                { if (x < minX) minX = x; if (x > maxX) maxX = x; }
             }
         return maxX < 0 ? (-1, -1) : (minX, maxX);
     }
