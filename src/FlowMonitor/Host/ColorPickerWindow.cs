@@ -284,18 +284,20 @@ internal static class ColorPickerWindow
         surface.BeginDraw(s * 96f);
         var dc = surface.Context;
         dc.Clear(new Color4(0f, 0f, 0f, 0f));
+        var cardBrush = res.Brush(SystemTheme.Card);
         var card = new RoundedRectangle(S(Picker.Card, s), Picker.Radius * s, Picker.Radius * s);
-        dc.FillRoundedRectangle(card, res.Brush(SystemTheme.Card));
+        dc.FillRoundedRectangle(card, cardBrush);
         dc.DrawRoundedRectangle(card, res.Brush(SystemTheme.Hairline), 1f * s);
 
-        dc.DrawText("Color Picker", res.Bold, VR(S(Picker.Title, s)), res.Brush(SystemTheme.Ink));
+        dc.DrawText("Color Picker",
+            res.Format("Segoe UI Variable Display", 28f, Vortice.DirectWrite.FontWeight.Normal),
+            VR(S(Picker.Title, s)), res.Brush(SystemTheme.Ink));
 
         EnsureBitmaps(dc);
 
-        // Disc first, then the ring band over it. Bitmaps are drawn through
-        // bitmap brushes because FillRectangle takes the destination rect.
+        // The disc is smaller than the ring hole, so a white gap separates them.
         if (_discBmp != null)
-            dc.DrawBitmap(_discBmp, (RectangleF?)Square(Picker.Center, Picker.RingInner, s), 1f,
+            dc.DrawBitmap(_discBmp, (RectangleF?)Square(Picker.Center, Picker.DiscR, s), 1f,
                 BitmapInterpolationMode.Linear, (RectangleF?)null);
         if (_ringBmp != null)
             dc.DrawBitmap(_ringBmp, (RectangleF?)Square(Picker.Center, Picker.RingOuter, s), 1f,
@@ -316,12 +318,14 @@ internal static class ColorPickerWindow
         var sv = Picker.PointFromSv(_hsv.S, _hsv.V);
         var white = res.Brush(new Color4(1f, 1f, 1f, 1f));
 
-        // Hue marker: a ring, not a disc, so the colour under it stays visible.
-        Ring(dc, (hue.X - Picker.MarkerR) * s, (hue.Y - Picker.MarkerR) * s, Picker.MarkerR * 2 * s, white, 2.4f * s);
-        // SV marker: filled with the exact colour it points at.
-        dc.FillEllipse(new Ellipse(new V2(sv.X * s, sv.Y * s), Picker.MarkerR * 0.6f * s, Picker.MarkerR * 0.6f * s),
-            res.Brush(pure.ToColor4()));
-        Ring(dc, (sv.X - Picker.MarkerR) * s, (sv.Y - Picker.MarkerR) * s, Picker.MarkerR * 2 * s, white, Picker.MarkerStroke * s);
+        // Hue marker: a filled disc of the pure colour, ringed in white, riding the band.
+        float rr = Picker.RingMarkerR * s;
+        dc.FillEllipse(new Ellipse(new V2(hue.X * s, hue.Y * s), rr, rr), res.Brush(pure.ToColor4()));
+        Ring(dc, (hue.X - Picker.RingMarkerR) * s, (hue.Y - Picker.RingMarkerR) * s,
+            rr * 2f, white, 2.2f * s);
+        // SV marker: a small hollow white ring.
+        Ring(dc, (sv.X - Picker.MarkerR) * s, (sv.Y - Picker.MarkerR) * s,
+            Picker.MarkerR * 2 * s, white, Picker.MarkerStroke * s);
     }
 
     static void Ring(ID2D1DeviceContext dc, float x, float y, float d, ID2D1Brush brush, float width)
@@ -355,19 +359,22 @@ internal static class ColorPickerWindow
     {
         var cur = Current();
         string[] values = [cur.ToHex(), cur.R.ToString(), cur.G.ToString(), cur.B.ToString()];
+        var valueFmt = res.Format("Segoe UI Variable Text", 12f, Vortice.DirectWrite.FontWeight.Normal);
+        var labelFmt = res.Format("Segoe UI Variable Text", 15f, Vortice.DirectWrite.FontWeight.Normal);
         for (int i = 0; i < 4; i++)
         {
             var pill = S(Picker.Pill(i), s);
             dc.FillRoundedRectangle(
                 new RoundedRectangle(pill, 6f * s, 6f * s), res.Brush(SystemTheme.Pill));
-            dc.DrawText(values[i], res.Micro, new Rect(pill.X, pill.Y, pill.Width, pill.Height),
+            dc.DrawText(values[i], valueFmt, new Rect(pill.X, pill.Y, pill.Width, pill.Height),
                 res.Brush(SystemTheme.Ink));
             var label = S(Picker.PillLabel(i), s);
-            dc.DrawText(Picker.PillLabels[i], res.Micro, new Rect(label.X, label.Y, label.Width, label.Height),
+            dc.DrawText(Picker.PillLabels[i], labelFmt,
+                new Rect(label.X, label.Y, label.Width, label.Height),
                 res.Brush(SystemTheme.MutedInk));
         }
 
-        var div = S(new RectangleF(Picker.Pad, Picker.DividerY, Picker.CardW - Picker.Pad * 2f, 1f), s);
+        var div = S(new RectangleF(0f, Picker.DividerY, Picker.CardW, 1f), s);
         dc.FillRectangle(div, res.Brush(SystemTheme.Hairline));
     }
 
@@ -411,7 +418,7 @@ internal static class ColorPickerWindow
         }
 
         // The disc bakes the hue in, so it is rebuilt whenever the hue leaves its bucket.
-        int discPx = (int)MathF.Ceiling(Picker.RingInner * 2f * _scale);
+        int discPx = (int)MathF.Ceiling(Picker.DiscR * 2f * _scale);
         int hueBucket = (int)Math.Round(_hsv.H / 2.0);
         if (_discBmp == null || _discHue != hueBucket || _discPx != discPx)
         {

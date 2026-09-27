@@ -24,6 +24,9 @@ public sealed class ResourceCache : IDisposable
     public IDWriteTextFormat Bold { get; }
 
     public ID2D1StrokeStyle RoundStroke { get; }
+
+    /// <summary>Factory for geometries callers build outside the cached set.</summary>
+    public ID2D1Factory D2DFactory => _device.D2DFactory;
     public ID2D1StrokeStyle Hairline { get; }
 
     /// <summary>Dashed companion lines, e.g. a committed-bytes line over a filled area.</summary>

@@ -15,46 +15,56 @@ public enum PickerPart
 /// <summary>
 /// Colour picker geometry in logical pixels, plus every point/value conversion.
 /// Paint and hit-test both read this file, so the drawn control and the clickable
-/// control cannot drift apart.
+/// control cannot drift apart. Proportions follow the reference card: the ring is
+/// 70% of the card width, the disc floats inside its hole with a white gap, and the
+/// field row is inset one step further than the title.
 /// </summary>
 public static class ColorPickerLayout
 {
     public const float CardW = 320f;
-    public const float CardH = 428f;
-    public const float Pad = 20f;
-    public const float Radius = 14f;
+    public const float CardH = 447f;
+    public const float Pad = 28f;
+    public const float Radius = 30f;
 
-    public static readonly PointF Center = new(CardW / 2f, 168f);
-    public const float RingOuter = 104f;
-    public const float RingInner = 74f;
+    public static readonly PointF Center = new(CardW / 2f, 185f);
+    public const float RingOuter = 110f;
+    public const float RingInner = 81f;
+    /// <summary>The disc is smaller than the ring hole, leaving a white gap.</summary>
+    public const float DiscR = 66f;
     /// <summary>Marker rides halfway through the ring band.</summary>
     public const float RingMarkR = (RingOuter + RingInner) / 2f;
-    public const float MarkerR = 8f;
+    /// <summary>Ring marker is the filled one, disc marker the small hollow one.</summary>
+    public const float RingMarkerR = 18f;
+    public const float MarkerR = 10f;
     public const float MarkerStroke = 2f;
 
-    public const float AlphaY = 306f;
-    public const float AlphaH = 18f;
-    public const float DividerY = 344f;
-    public const float PillY = 360f;
-    public const float PillH = 28f;
-    public const float PillW = 58f;
-    public const float PillGap = 6f;
-    public const float LabelY = 392f;
-    public const float DropW = 24f;
+    public const float AlphaY = 317f;
+    public const float AlphaH = 17f;
+    public const float DividerY = 351f;
+    public const float PillY = 366f;
+    public const float PillH = 26f;
+    public const float HexW = 68f;
+    public const float Cxw = 39f;
+    public const float PillGap = 5f;
+    public const float LabelY = 398f;
+    public const float LabelH = 18f;
+    public const float DropW = 20f;
 
-    public static RectangleF Title => new(Pad, 16f, CardW - Pad * 2f, 24f);
+    public static RectangleF Title => new(Pad + 6f, 30f, CardW - Pad * 2f, 36f);
     public static RectangleF Card => new(0f, 0f, CardW, CardH);
 
-    public static RectangleF AlphaTrack =>
-        new(Pad, AlphaY, CardW - Pad * 2f, AlphaH);
+    public static RectangleF AlphaTrack => new(Pad, AlphaY, CardW - Pad * 2f, AlphaH);
 
-    public static RectangleF Pill(int i) =>
-        new(Pad + i * (PillW + PillGap), PillY, PillW, PillH);
+    /// <summary>Field 0 is the wide hex field, 1..3 the R/G/B fields.</summary>
+    public static RectangleF Pill(int i)
+        => i == 0
+            ? new RectangleF(Pad, PillY, HexW, PillH)
+            : new RectangleF(Pad + HexW + PillGap * 2f + (i - 1) * (Cxw + PillGap), PillY, Cxw, PillH);
 
-    public static RectangleF Eyedropper => new(CardW - Pad - DropW, PillY, DropW, PillH);
+    public static RectangleF Eyedropper =>
+        new(CardW - Pad - DropW, PillY, DropW, PillH);
 
-    public static RectangleF PillLabel(int i) =>
-        new(Pad + i * (PillW + PillGap), LabelY, PillW, 14f);
+    public static RectangleF PillLabel(int i) => new(Pill(i).Left, LabelY, Pill(i).Width, LabelH);
 
     public static readonly string[] PillLabels = ["#", "R", "G", "B"];
 
@@ -90,17 +100,17 @@ public static class ColorPickerLayout
     /// <summary>Saturation grows from the centre out; value falls from the top down.</summary>
     public static (double S, double V) SvFromPoint(float x, float y)
     {
-        double s = Math.Clamp(MathF.Sqrt((x - Center.X) * (x - Center.X) + (y - Center.Y) * (y - Center.Y))
-                              / RingInner, 0.0, 1.0);
-        double v = Math.Clamp((y - (Center.Y - RingInner)) / (RingInner * 2.0), 0.0, 1.0);
+        float dx = x - Center.X, dy = y - Center.Y;
+        double s = Math.Clamp(MathF.Sqrt(dx * dx + dy * dy) / DiscR, 0.0, 1.0);
+        double v = Math.Clamp((dy + DiscR) / (DiscR * 2.0), 0.0, 1.0);
         return (s, v);
     }
 
     public static PointF PointFromSv(double s, double v)
     {
-        double r = Math.Clamp(s, 0.0, 1.0) * RingInner;
-        double yy = (1.0 - Math.Clamp(v, 0.0, 1.0)) * RingInner * 2.0;
-        return new PointF(Center.X + (float)r, Center.Y - RingInner + (float)yy);
+        double r = Math.Clamp(s, 0.0, 1.0) * DiscR;
+        double yy = (1.0 - Math.Clamp(v, 0.0, 1.0)) * DiscR * 2.0;
+        return new PointF(Center.X + (float)r, Center.Y - DiscR + (float)yy);
     }
 
     public static double AlphaFromX(float x)
