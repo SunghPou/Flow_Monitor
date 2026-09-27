@@ -743,7 +743,7 @@ public sealed class DesktopHost : IRenderHost, IDisposable
     /// <summary>Consecutive per-widget render failures before that widget is retired.</summary>
     public const int RenderFaultsBeforeRetire = 30;
 
-    void FlushPendingGeometry()
+    internal void FlushPendingGeometry()
     {
         lock (_pendingGate)
         {
@@ -752,6 +752,8 @@ public sealed class DesktopHost : IRenderHost, IDisposable
             {
                 if (width == 0 && height == 0) w.MoveTo(x, y);
                 else w.ResizeTo(width, height);
+                // A drag or resize the user never applied must still survive a restart.
+                WidgetStore.Save(w.Config);
             }
             _pendingGeometry.Clear();
         }
@@ -1279,10 +1281,16 @@ public sealed class DesktopHost : IRenderHost, IDisposable
         foreach (var w in snapshot) w.RequestRedraw();
     }
 
-    /// <summary>Test seam: track an externally-created widget so the sample wakeup reaches it.</summary>
-    internal void TrackWidgetForTest(WidgetWindow w)
+    /// <summary>Test seam: track (or untrack, with null) a widget so the host reaches it.</summary>
+    internal void TrackWidgetForTest(WidgetWindow? w)
     {
-        lock (_widgets) _widgets.Add(w);
+        lock (_widgets) { if (w is null) return; _widgets.Add(w); }
+    }
+
+    /// <summary>Test seam: stop tracking a widget the test created and dropped.</summary>
+    internal void ForgetWidgetForTest(WidgetWindow w)
+    {
+        lock (_widgets) _widgets.Remove(w);
     }
 
     public void Dispose()

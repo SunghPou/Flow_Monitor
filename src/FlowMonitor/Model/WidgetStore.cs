@@ -4,7 +4,8 @@ using System.Text.Json.Serialization;
 namespace FlowMonitor.Model;
 
 /// <summary>
-/// One JSON file per widget under <c>%LOCALAPPDATA%\FlowMonitor\widgets</c>. A file per widget
+/// One JSON file per widget in the first writable store root
+/// (<c>%LOCALAPPDATA%\FlowMonitor\widgets</c>, else next to the binary). A file per widget
 /// rather than one array means a corrupt or half-written file can only ever cost the user that
 /// one widget, never the whole layout.
 /// </summary>
@@ -18,24 +19,68 @@ public static class WidgetStore
 
     public static string Directory { get; } = ResolveDirectory();
 
+    /// <summary>Test-only store root; null in the app. Set before a store round trip.</summary>
+    internal static string? DirectoryOverride;
+
+    /// <summary>Root the store settles on, after a writable probe and a config-count tiebreak.</summary>
+    internal static string ResolvedDirectory => DirectoryOverride ?? Directory;
+
+    /// <summary>
+    /// Picks the store root: every candidate must survive a real write probe, and a
+    /// candidate that already holds configs beats one that does not, so an existing
+    /// layout is never abandoned for an empty directory.
+    /// </summary>
     static string ResolveDirectory()
     {
+        string? firstWritable = null;
         foreach (var root in new[] { Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                                      AppContext.BaseDirectory })
         {
             if (string.IsNullOrEmpty(root)) continue;
-            try
-            {
-                string dir = Path.Combine(root, "FlowMonitor", "widgets");
-                System.IO.Directory.CreateDirectory(dir);
-                return dir;
-            }
-            catch { /* try the next candidate */ }
+            string dir = Path.Combine(root, "FlowMonitor", "widgets");
+            if (!Writable(dir)) continue;
+            if (CountConfigs(dir) > 0) return SweepTmp(dir);
+            firstWritable ??= dir;
         }
+        if (firstWritable is not null) return SweepTmp(firstWritable);
         return Path.Combine(AppContext.BaseDirectory, "widgets");
     }
 
-    static string PathFor(string id) => Path.Combine(Directory, Sanitize(id) + ".json");
+    /// <summary>Create + write + delete a probe file: an existing directory is not proof of access.</summary>
+    static bool Writable(string dir)
+    {
+        string probe = Path.Combine(dir, $".probe-{Environment.ProcessId}");
+        try
+        {
+            System.IO.Directory.CreateDirectory(dir);
+            File.WriteAllText(probe, "0");
+            File.Delete(probe);
+            return true;
+        }
+        catch { return false; }
+    }
+
+    static int CountConfigs(string dir)
+    {
+        try { return System.IO.Directory.Exists(dir) ? System.IO.Directory.GetFiles(dir, "*.json").Length : 0; }
+        catch { return 0; }
+    }
+
+    /// <summary>Removes half-written temporaries a hard kill left behind; they are never read.</summary>
+    static string SweepTmp(string dir)
+    {
+        try
+        {
+            foreach (string file in System.IO.Directory.EnumerateFiles(dir, "*.json.tmp"))
+            {
+                try { File.Delete(file); } catch { /* locked; a unique temp name makes it harmless */ }
+            }
+        }
+        catch (Exception ex) { Log.Warn("WidgetStore tmp sweep failed: " + ex.Message); }
+        return dir;
+    }
+
+    static string PathFor(string id) => Path.Combine(ResolvedDirectory, Sanitize(id) + ".json");
 
     /// <summary>Keeps a caller-supplied id from escaping the widgets directory.</summary>
     static string Sanitize(string id)
@@ -50,7 +95,8 @@ public static class WidgetStore
         try
         {
             string path = PathFor(cfg.Id);
-            string tmp = path + ".tmp";
+            // Unique temp name: a leftover or held temp file can never block a save.
+            string tmp = $"{path}.{Environment.ProcessId}.tmp";
             File.WriteAllText(tmp, JsonSerializer.Serialize(cfg, Options));
             // Replace atomically so a crash mid-write cannot leave a truncated config behind.
             File.Move(tmp, path, overwrite: true);
@@ -73,8 +119,8 @@ public static class WidgetStore
         var result = new List<WidgetConfig>();
         try
         {
-            if (!System.IO.Directory.Exists(Directory)) return result;
-            foreach (string file in System.IO.Directory.EnumerateFiles(Directory, "*.json"))
+            if (!System.IO.Directory.Exists(ResolvedDirectory)) return result;
+            foreach (string file in System.IO.Directory.EnumerateFiles(ResolvedDirectory, "*.json"))
             {
                 try
                 {
@@ -95,6 +141,7 @@ public static class WidgetStore
         {
             Log.Warn("WidgetStore.LoadAll failed: " + ex.Message);
         }
+        Log.Info($"widget store: {ResolvedDirectory} ({result.Count} config(s))");
         return result;
     }
 }

@@ -15,3 +15,4 @@
 13. `PERFORMANCE_INFORMATION` must match native (104 bytes x64, `Pack = 8`, `PageSize` is `SIZE_T`); every count field is in pages, scale by `PageSize`.
 14. Chart chrome and axis ticks follow `docs/design.md`; byte scales are `ChartRenderer.ByteAxisMax` (power of two, floor 4).
 15. Sampler state the render thread reads is copied out under a lock (`GpuSampler.EngineSnapshot`); never enumerate a list the sampling thread rebuilds.
+16. Persist geometry on move/resize, not only on apply: `FlushPendingGeometry` saves, so a drag survives a restart without the checkmark.

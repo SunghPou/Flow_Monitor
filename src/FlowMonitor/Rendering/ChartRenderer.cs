@@ -81,8 +81,8 @@ public sealed class ChartRenderer
     /// The plot area, its ticks and the axis maximum. Byte axes reserve a left gutter
     /// sized to their own widest label so the labels sit outside the plot and the curve
     /// never runs under them; percent axes draw no labels and span the full width.
-    /// LabelColumnX (logical px) is where the tick column ends: the header anchors the
-    /// X badge to it, so the badge and the values share one vertical line
+    /// LabelColumnX (logical px) is the tick column's left ink edge: the header anchors
+    /// the X badge to it, so the badge heads the values on one vertical line
     /// (docs/design.md header rule 5).
     /// </summary>
     public PlotGeom Geometry(WidgetConfig cfg, ChartModel model, float s, float width, float height)
@@ -107,7 +107,12 @@ public sealed class ChartRenderer
                 + Widgets.HeaderLayout.GapText * s);
 
         var rect = new RectF(plotLeft, plotTop, plotRight - plotLeft, plotBottom - plotTop);
-        return new PlotGeom(rect, labels, axisMax, plotLeft / s);
+        // With a tick column, its left edge is the card inset (the widest label starts
+        // there), and the header anchors the X badge to it so the glyph heads the values
+        // on one vertical line, the way a table header sits over its first column
+        // (docs/design.md rule 5). With no column, 0 keeps the badge on its corner inset.
+        float columnInkX = labels.Length > 0 ? pad / s : 0f;
+        return new PlotGeom(rect, labels, axisMax, columnInkX);
     }
 
     /// <summary>

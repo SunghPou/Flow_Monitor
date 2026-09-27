@@ -19,9 +19,11 @@ public readonly record struct HeaderLayout(RectF Value, RectF Title, RectF Prev,
     // Smallest card edge to badge ink: the corner bracket owns the outermost strip, so
     // the badges start one text gap inside it.
     public const float BadgeClear = WidgetPainter.CornerSpan + GapText;
-    // The X glyph's ink ends on this x, so the badge sits in the column of tick values
-    // when the card has them, and one badge width clear of the bracket when it does not.
-    public static readonly float MinAnchor = BadgeClear + WidgetPainter.BadgeGlyphHalf * 2f;
+    // Hard floor for a left-aligned X badge's ink: the card inset, the same left edge
+    // the tick column starts on. The corner bracket's arms live in the card's top strip
+    // and are asserted not to collide with the glyph, so the floor needs no bracket
+    // arithmetic (docs/design.md header rule 5).
+    public const float MinInkLeft = Inset;
     public const float ChevBox = 26f;     // metric chevron hit box (square)
     public const float ChevGap = 8f;      // chevron hit box to title ink
     public const float RowCenter = 19f;   // the one optical center of the row
@@ -29,16 +31,20 @@ public readonly record struct HeaderLayout(RectF Value, RectF Title, RectF Prev,
     const float ValueH = 26f;
 
     /// <summary>
-    /// The X (left) and check (right) hit boxes. The X glyph's ink ends on anchorX — the
-    /// tick column's right edge — and the check mirrors that distance about the card's
-    /// centre line, so both sit the same distance from their edge. anchorX is clamped to
-    /// <see cref="MinAnchor"/> and to the card's half width.
+    /// The X (left) and check (right) hit boxes. The X glyph's ink starts on anchorX — the
+    /// tick column's left edge — and the check mirrors that distance about the card's
+    /// centre line, never coming closer to its edge than <see cref="BadgeClear"/> so it
+    /// keeps clear of the top-right bracket. anchorX 0 means no tick column.
     /// </summary>
     public static (RectF Close, RectF Check) BadgeRects(float logicalW, float anchorX)
     {
-        float a = Math.Clamp(anchorX, MinAnchor, Math.Max(MinAnchor, logicalW / 2f));
-        float xCenter = a - WidgetPainter.BadgeGlyphHalf;
-        float checkCenter = logicalW - xCenter;
+        // anchorX > 0: the tick column's left ink edge, so the X heads the values.
+        // anchorX == 0: no column, sit at the preferred BadgeClear inset.
+        float inkL = anchorX > 0f ? Math.Max(anchorX, MinInkLeft) : BadgeClear;
+        float xCenter = inkL + WidgetPainter.BadgeGlyphHalf;
+        // Mirror the X, but never closer to the right edge than the bracket it clears.
+        float checkInkR = Math.Min(logicalW - inkL, logicalW - BadgeClear);
+        float checkCenter = checkInkR - WidgetPainter.BadgeGlyphHalf;
         return (new RectF(xCenter - BadgeBox / 2f, RowCenter - BadgeBox / 2f, BadgeBox, BadgeBox),
                 new RectF(checkCenter - BadgeBox / 2f, RowCenter - BadgeBox / 2f, BadgeBox, BadgeBox));
     }

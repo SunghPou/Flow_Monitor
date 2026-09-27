@@ -13,8 +13,8 @@ insets). Anyone touching widget chrome follows this file.
 | `GapChrome` | 12 | min gap between text and any badge/glyph |
 | `BadgeBox` | 30 | X / checkmark hit box (square) |
 | `BadgeGlyphHalf` | 6.14 | badge ink half-width, stroke included; what every reserve measures |
-| `BadgeClear` | 24.5 | min card edge to badge ink: corner bracket + `GapText` |
-| `MinAnchor` | 36.7 | floor for the X anchor: `BadgeClear` + one full glyph |
+| `BadgeClear` | 24.5 | preferred card edge to badge ink on cards with no tick column |
+| `MinAnchor` | 28.8 | hard floor for the X anchor: `CornerSpan` + one full glyph |
 | `ChevBox` | 26 | metric chevron hit box (square) |
 | `ChevGap` | 8 | gap between chevron and title |
 | `RowCenter` | 19 | the single optical center of the header row |
@@ -35,9 +35,11 @@ to a box would leave the glyph visibly short of the line it is meant to sit on.
    text-to-chrome. Ink that is *reserved* can never be overlapped; a hit box may
    overhang into a gap (invisible), and only a card too narrow to centre the
    group clips the title.
-5. The X heads the axis tick column: its ink ends on the column's right edge,
-   never closer to the card edge than `MinAnchor`, and never past the card's
-   centre line. The check is the mirror image of that placement, so the pair is
+5. The X heads the axis tick column: its ink ends flush on the column's right
+   ink edge (not the gutter box, which sits one `GapText` further right), never
+   left of `MinAnchor` so it keeps clear of the corner bracket, and never past
+   the card's centre line. With no tick column it sits at the `BadgeClear`
+   inset instead. The check mirrors whichever distance was used, so the pair is
    symmetrical on any card. The value clears the check ink by `GapChrome` and
    the centered group clears the X ink by `GapChrome`.
 6. Paint and hit-test share one definition (`HeaderLayout`): the rects used to

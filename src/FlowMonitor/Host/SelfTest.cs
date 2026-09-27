@@ -497,29 +497,30 @@ public static class SelfTest
                     "(any difference reads as the card shifting under the user)");
             }
 
-            // The X badge rides the tick column: the glyph's right edge lands on the same x
-            // the tick values end at, so the badge reads as the head of that column.
-            // Measured from rendered pixels, with the badge painted at hover brightness so
-            // only it clears the 200+ white threshold.
+            // The X badge heads the tick column. Both edges are measured from rendered
+            // pixels: the badge's LEFT ink edge against the LEFT ink edge of the tick
+            // values themselves, so this cannot pass by echoing the layout's own anchor.
             {
                 var badgeModel = BuildSineModel(surface.Width, surface.Height, percent: false, axisMax: 100);
                 Seed(badgeModel.Series[0].Data, SeedCount, TestNow + Headroom);
                 Snap(badgeModel);
                 badgeModel.EditChrome = true;
-                var plotRect = chart.Geometry(new WidgetConfig(), badgeModel, 1f, surface.Width,
-                    surface.Height).Rect;
-                var badges = HeaderLayout.Compute(surface.Width, 45f, 60f, editing: true,
-                    plotRect.Left);
-                var (xInkL, xInkR) = BrightInkX(GrabBadges(badgeModel, badges),
-                    surface.Width, surface.Height, 0, (int)plotRect.Left + 8,
+                var geo = chart.Geometry(new WidgetConfig(), badgeModel, 1f, surface.Width, surface.Height);
+                var badges = HeaderLayout.Compute(surface.Width, 45f, 60f, editing: true, geo.LabelColumnX);
+                var pxBadges = GrabBadges(badgeModel, badges);
+                int labelHi = (int)geo.Rect.Left + 8;
+                var (labelInkL, _) = GrayInkX(pxBadges, surface.Width, surface.Height, 0, labelHi, plotTopScan);
+                var (xInkL, xInkR) = BrightInkX(pxBadges, surface.Width, surface.Height, 0, labelHi,
                     (int)(HeaderLayout.RowCenter - 14f), (int)(HeaderLayout.RowCenter + 14f));
-                Check(xInkR > 0 && Math.Abs(xInkR - plotRect.Left) <= 2,
-                    "X badge ink ends on the tick column",
-                    $"X ink spans x={xInkL}..{xInkR}px, tick values end at x={plotRect.Left:0.0}px " +
-                    "(the badge should head that column, not float in the corner)");
-                Check(xInkL > WidgetPainter.CornerSpan,
-                    "X badge ink still clears the corner bracket",
-                    $"X ink starts at x={xInkL}, bracket strip ends at x={WidgetPainter.CornerSpan:0.0}");
+                Check(labelInkL > 0 && xInkL > 0 && Math.Abs(xInkL - labelInkL) <= 2,
+                    "X badge ink starts on the tick values' left edge",
+                    $"X ink spans x={xInkL}..{xInkR}px, tick values start at x={labelInkL}px " +
+                    "(2px tolerance; the badge heads the column, it does not float beside it)");
+                // The bracket's arms live in the card's top strip, so the X clears them
+                // above and below, not by standing further right than the values.
+                Check(xInkL >= (int)HeaderLayout.MinInkLeft - 1,
+                    "X badge ink stays inside the card inset",
+                    $"X ink starts at x={xInkL}, inset floor is {HeaderLayout.MinInkLeft:0.0}");
             }
 
             // The label gutter is measured from the labels themselves, so the curve can
@@ -608,17 +609,20 @@ public static class SelfTest
                         $"prev [{edit.Prev.X:0.0}..{edit.Prev.Right:0.0}] vs X [{edit.Close.X:0.0}..{edit.Close.Right:0.0}], next [{edit.Next.X:0.0}..{edit.Next.Right:0.0}] vs check [{edit.Check.X:0.0}..{edit.Check.Right:0.0}]");
                 }
 
-                // The X rides the tick column: its ink ends on the column's right edge and
+                // The X rides the tick column: its ink starts on the column's left edge and
                 // the check takes the same distance from the other edge (docs/design.md 5).
-                foreach (float anchor in new[] { 43.7f, 60f, 96f })
+                foreach (float anchor in new[] { 12f, 43.7f, 60f, 96f })
                 {
                     var edit = HeaderLayout.Compute(460, titleW: 45, valueW: 110, editing: true, anchorX: anchor);
-                    float xInkR = HeaderLayout.BadgeInkRight(edit.Close);
-                    float checkInkL = HeaderLayout.BadgeInkLeft(edit.Check);
-                    Check(Math.Abs(xInkR - Math.Max(anchor, HeaderLayout.MinAnchor)) <= 0.01f
-                            && Math.Abs((460f - checkInkL) - xInkR) <= 0.01f,
-                        $"X ink ends on the tick column, check mirrors it (anchor {anchor:0.0})",
-                        $"X ink ends {xInkR:0.0}, check ink starts {checkInkL:0.0} ({(460f - checkInkL):0.0} from the right edge)");
+                    float xInkL = HeaderLayout.BadgeInkLeft(edit.Close);
+                    float checkInkR = HeaderLayout.BadgeInkRight(edit.Check);
+                    // The check mirrors the X, but never closer to its edge than BadgeClear.
+                    float mirrored = Math.Min(460f - Math.Max(anchor, HeaderLayout.MinInkLeft),
+                        460f - HeaderLayout.BadgeClear);
+                    Check(Math.Abs(xInkL - Math.Max(anchor, HeaderLayout.MinInkLeft)) <= 0.01f
+                            && Math.Abs(checkInkR - mirrored) <= 0.01f,
+                        $"X ink starts on the tick column, check mirrors it (anchor {anchor:0.0})",
+                        $"X ink starts {xInkL:0.0}, check ink ends {checkInkR:0.0} ({(460f - checkInkR):0.0} from the right edge, mirror {mirrored:0.0})");
                 }
 
                 // The top-right corner bracket and the check glyph shared pixels; the
@@ -946,7 +950,51 @@ public static class SelfTest
                             "the woken widget presents its next frame",
                             drew ? "RenderFrame true after the tick" : "still refusing to draw after being woken");
 
-                        // --- 6f. card contact sheet (--capture only) ---
+                        // --- 6f. a drag is persisted without the checkmark ---
+                        // Geometry used to be applied to the window but never written back,
+                        // so a widget the user moved and did not re-apply came back at its
+                        // old spot on the next launch.
+                        {
+                            string storeDir = System.IO.Path.Combine(
+                                System.IO.Path.GetTempPath(), "flowmonitor-selftest-store");
+                            System.IO.Directory.CreateDirectory(storeDir);
+                            string? priorStore = Model.WidgetStore.DirectoryOverride;
+                            Model.WidgetStore.DirectoryOverride = storeDir;
+                            try
+                            {
+                                var dragged = new WidgetWindow(fhost, new WidgetConfig
+                                {
+                                    Id = "selftest-geometry",
+                                    X = 400,
+                                    Y = 300,
+                                    Width = 320,
+                                    Height = 140,
+                                    Graph = GraphKind.Cpu,
+                                });
+                                fhost.TrackWidgetForTest(dragged);
+                                fhost.OnWidgetGeometryChanged(dragged, 1500, 640, 0, 0);
+                                fhost.FlushPendingGeometry();
+                                string path = System.IO.Path.Combine(storeDir, "selftest-geometry.json");
+                                bool saved = System.IO.File.Exists(path)
+                                    && System.IO.File.ReadAllText(path).Contains("\"X\": 1500")
+                                    && System.IO.File.ReadAllText(path).Contains("\"Y\": 640");
+                                Check(saved,
+                                    "a drag persists without the user pressing the checkmark",
+                                    saved
+                                        ? "config on disk holds the dragged position 1500,640"
+                                        : "config on disk does not hold the dragged position (a restart would move it back)");
+                                fhost.ForgetWidgetForTest(dragged);
+                                dragged.Destroy();
+                            }
+                            catch (Exception ex)
+                            {
+                                failures++;
+                                Log.Write("ERROR", "geometry persistence test threw: " + ex);
+                            }
+                            finally { Model.WidgetStore.DirectoryOverride = priorStore; }
+                        }
+
+                        // --- 6g. card contact sheet (--capture only) ---
                         // One capture per GraphKind on real telemetry, locked and edit,
                         // so every card can be eyeballed instead of assumed correct.
                         if (captureDir.Length > 0)
