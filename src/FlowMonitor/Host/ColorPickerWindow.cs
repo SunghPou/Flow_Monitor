@@ -155,7 +155,9 @@ internal static class ColorPickerWindow
             return;
         }
 
-        Native.SetTransientBackdrop(_hwnd);
+        // No DWM transient backdrop: the card paints its own themed background, and the
+        // system backdrop is drawn with its own corner shape, which boxed the popup's
+        // rounded corners against a dark page.
         _surface = new WidgetSurface(host.Device, _hwnd, w, h);
         Native.ShowWindow(_hwnd, 5);
         Native.SetCapture(_hwnd);
