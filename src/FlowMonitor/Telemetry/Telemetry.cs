@@ -25,7 +25,7 @@ public sealed class Telemetry : IDisposable
     Thread? _thread;
     volatile bool _running;
     int _intervalMs = 1000;
-    long _freq;
+    readonly System.Diagnostics.Stopwatch _clock = System.Diagnostics.Stopwatch.StartNew();
     readonly List<double> _tickTimes = new();
 
     public event Action? Sampled;
@@ -66,7 +66,6 @@ public sealed class Telemetry : IDisposable
     {
         if (_running) return;
         _running = true;
-        Native.QueryPerformanceFrequency(out _freq);
         _thread = new Thread(Loop) { IsBackground = true, Name = "FlowMonitor.Telemetry", Priority = ThreadPriority.BelowNormal };
         _thread.Start();
     }
@@ -101,15 +100,8 @@ public sealed class Telemetry : IDisposable
         }
     }
 
-    /// <summary>Seconds since the telemetry clock started. Monotonic, high resolution.</summary>
-    public double Time
-    {
-        get
-        {
-            Native.QueryPerformanceCounter(out long c);
-            return _freq > 0 ? c / (double)_freq : c / 10_000_000.0;
-        }
-    }
+    /// <summary>Seconds since this instance was created. Monotonic, high resolution.</summary>
+    public double Time => _clock.Elapsed.TotalSeconds;
 
     /// <summary>Wraps a raw Win32 HANDLE in a <see cref="WaitHandle"/> so it can be used with WaitHandle.WaitAny.</summary>
     sealed class RawWaitHandle : WaitHandle
