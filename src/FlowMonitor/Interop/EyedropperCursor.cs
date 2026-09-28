@@ -4,14 +4,14 @@ namespace FlowMonitor.Interop;
 
 /// <summary>
 /// The eyedropper pointer, drawn at runtime instead of shipped as a resource.
-/// Blender swaps in a dedicated eyedropper cursor while the picker is up
-/// (source/blender/windowmanager/wm_cursors.hh, WM_CURSOR_EYEDROPPER); Windows has
-/// no stock equivalent, so the mask is built here: a 45 degree pipette whose hot
-/// spot is the tip, exactly like the glyph the picker paints in its dropper field.
+/// Blender swaps in a dedicated eyedropper cursor while sampling (wm_cursors.hh,
+/// WM_CURSOR_EYEDROPPER) and Windows has no stock equivalent, so the mask is built
+/// here from <see cref="BlenderDropper"/>: Blender's own eyedropper icon, with the
+/// hot spot on the pipette tip so the sampled pixel sits under the point.
 /// </summary>
 public static class EyedropperCursor
 {
-    const int Size = 32;
+    const int Size = BlenderDropper.Size;
 
     static readonly Lazy<IntPtr> LazyHandle = new(() => Build());
     public static IntPtr Handle => LazyHandle.Value;
@@ -29,32 +29,11 @@ public static class EyedropperCursor
 
     // ------------------------------------------------------------------ shape
 
-    // Shared with the painted glyph in ColorPickerWindow: bulb, collar, shaft,
-    // barrel, taper, all along the 45 degree axis (along, across) in pixels.
-    static bool Pipette(double along, double across)
-    {
-        if (Math.Abs(across) > 4.0) return false;
-        if ((along + 4.6) * (along + 4.6) + across * across <= 3.1 * 3.1) return true;   // bulb
-        if ((along + 0.9) * (along + 0.9) + across * across <= 1.7 * 1.7) return true;   // collar
-        if (along >= -2.4 && along <= 4.2 && Math.Abs(across) <= 1.5) return true;      // shaft
-        if (along > 4.2 && along <= 5.6)                                                // taper
-            return Math.Abs(across) <= 1.5 * (5.6 - along) / 1.4;
-        return false;
-    }
+    // Blender's icon raster, so the pointer and the painted field icon match.
+    static bool ShapeAt(int x, int y) => BlenderDropper.Lit(x, y);
 
-    // The tip is the hot spot, so the pixel the user is sampling sits under the point.
-    const double Centre = 15.5;
-    const double TipAlong = 5.6;
-
-    static bool ShapeAt(int x, int y)
-    {
-        double dx = x - Centre, dy = y - Centre;
-        double k = Math.Sqrt(0.5);
-        return Pipette((dx + dy) * k, (dx - dy) * k);
-    }
-
-    static int HotX => (int)Math.Round(Centre + TipAlong * Math.Sqrt(0.5));
-    static int HotY => HotX;
+    static int HotX => BlenderDropper.HotX;
+    static int HotY => BlenderDropper.HotY;
 
     // ------------------------------------------------------------------ build
 

@@ -81,7 +81,7 @@ internal static class ColorPickerWindow
                     return new IntPtr(0);
 
                 case Native.WM_MOUSEWHEEL:
-                    Wheel(wParam);
+                    Wheel(wParam, lParam);
                     return new IntPtr(0);
 
                 case Native.WM_SETCURSOR:
@@ -183,7 +183,12 @@ internal static class ColorPickerWindow
         // No DWM transient backdrop: the card paints its own themed background, and the
         // system backdrop is drawn with its own corner shape, which boxed the popup's
         // rounded corners against a dark page.
-        _surface = new WidgetSurface(host.Device, _hwnd, w, h);
+        // The surface drives the shared device, so building it takes the same lock the
+        // render thread holds while it draws the widgets: IDCompositionDevice is an
+        // apartment object and touching it from two threads is an access violation
+        // inside dcomp.dll that no managed try/catch can catch.
+        lock (host.Device.GpuLock) { _surface = new WidgetSurface(host.Device, _hwnd, w, h); }
+        Log.Info($"picker: open hwnd=0x{_hwnd.ToInt64():X} start={_hsv.ToRgb()}");
         Native.ShowWindow(_hwnd, 5);
         Native.SetCapture(_hwnd);
         Native.SetForegroundWindow(_hwnd);
@@ -205,7 +210,9 @@ internal static class ColorPickerWindow
     {
         _up = true;
         try { if (_hwnd != IntPtr.Zero) Native.ReleaseCapture(); } catch { }
-        try { _surface?.Dispose(); } catch (Exception ex) { Log.Warn("picker: surface dispose: " + ex.Message); }
+        // Released under the render thread's lock, same as it was taken in Run.
+        try { lock (_host?.Device.GpuLock ?? new object()) { _surface?.Dispose(); } }
+        catch (Exception ex) { Log.Warn("picker: surface dispose: " + ex.Message); }
         _surface = null;
         try { if (Native.IsWindow(_hwnd)) Native.DestroyWindow(_hwnd); } catch { }
         _hwnd = IntPtr.Zero;
@@ -272,13 +279,14 @@ internal static class ColorPickerWindow
 
     /// <summary>
     /// Wheel over the card nudges the value component, and a wheel turn outside it
-    /// commits and closes, both as Blender's colorpicker_wheel_cb does.
+    /// commits and closes, both as Blender's colorpicker_wheel_cb does. The cursor
+    /// position arrives in lParam; wParam carries the delta in its high word.
     /// </summary>
-    static void Wheel(IntPtr wParam)
+    static void Wheel(IntPtr wParam, IntPtr lParam)
     {
         int delta = (short)(wParam.ToInt64() >> 16);
-        int px = (short)(wParam.ToInt64() & 0xFFFF);
-        int py = (short)((wParam.ToInt64() >> 16) & 0xFFFF);
+        int px = (short)(lParam.ToInt64() & 0xFFFF);
+        int py = (short)((lParam.ToInt64() >> 16) & 0xFFFF);
 
         if (px < 0 || py < 0 || px >= Picker.CardW * _scale || py >= Picker.CardH * _scale)
         {
@@ -291,13 +299,18 @@ internal static class ColorPickerWindow
         Paint();
     }
 
-    /// <summary>Hides the card, samples the pixel the user clicks, brings the card back.</summary>
+    /// <summary>
+    /// Hands the desktop to the user: the card steps aside, the pipette cursor follows
+    /// the mouse anywhere, the next click samples that pixel, Esc cancels. Capture is
+    /// released first so the window under the mouse behaves normally while sampling.
+    /// </summary>
     static void PickScreen()
     {
+        Native.ReleaseCapture();
         Native.ShowWindow(_hwnd, 0 /* SW_HIDE */);
-        Native.GetCursorPos(out var at);
+        Native.GetCursorPos(out _);
         Thread.Sleep(60);
-        var picked = Interop.ScreenPick.PickUnderCursor(at);
+        var picked = Interop.ScreenPick.PickUnderCursor();
         if (picked is Rgba rgb)
         {
             _hsv = rgb.ToHsv();
@@ -346,10 +359,6 @@ internal static class ColorPickerWindow
         var card = new RoundedRectangle(S(Picker.Card, s), Picker.Radius * s, Picker.Radius * s);
         dc.FillRoundedRectangle(card, cardBrush);
         dc.DrawRoundedRectangle(card, res.Brush(SystemTheme.Hairline), 1f * s);
-
-        dc.DrawText("Color Picker",
-            res.Format("Segoe UI Variable Display", 28f, Vortice.DirectWrite.FontWeight.Normal),
-            VR(S(Picker.Title, s)), res.Brush(SystemTheme.Ink));
 
         EnsureWheel(dc);
         if (_wheelBmp != null)
@@ -430,33 +439,24 @@ internal static class ColorPickerWindow
     }
 
     /// <summary>
-    /// A pipette: rubber bulb, collar, barrel, tapered tip. Drawn along the 45
-    /// degree axis so the tip points into the pixel the user is sampling.
+    /// Blender's eyedropper icon, the same raster the Windows pointer uses, tinted with
+    /// the theme's ink. The pipette tip points down into where the sample lands.
     /// </summary>
     static void DrawEyedropper(ID2D1DeviceContext dc, ResourceCache res, float s)
     {
         var box = S(Picker.Eyedropper, s);
         dc.FillRoundedRectangle(new RoundedRectangle(box, 6f * s, 6f * s), res.Brush(SystemTheme.Pill));
-        var ink = res.Brush(SystemTheme.Ink);
-        float cx = box.X + box.Width / 2f, cy = box.Y + box.Height / 2f;
-        float w = 1.5f * s;
 
-        // 45 degrees, tip at the lower right: the sample direction.
-        static V2 At(float cx, float cy, float along, float across)
-        {
-            float k = MathF.Sqrt(0.5f);
-            return new V2(cx + (along * k + across * k), cy + (along * k - across * k));
-        }
-
-        float bulb = 3.1f * s, collar = 1.7f * s, barrel = 1.5f * s;
-        dc.FillEllipse(new Ellipse(At(cx, cy, -4.6f * s, 0f), bulb, bulb), ink);
-        dc.FillEllipse(new Ellipse(At(cx, cy, -0.9f * s, 0f), collar, collar), ink);
-        dc.DrawLine(At(cx, cy, -2.4f * s, 0f), At(cx, cy, 0.6f * s, 0f), ink, w * 1.6f);
-        // Barrel outline, then the taper down to the tip.
-        dc.DrawLine(At(cx, cy, 0.6f * s, -barrel), At(cx, cy, 4.2f * s, -barrel), ink, w);
-        dc.DrawLine(At(cx, cy, 0.6f * s, barrel), At(cx, cy, 4.2f * s, barrel), ink, w);
-        dc.DrawLine(At(cx, cy, 4.2f * s, -barrel), At(cx, cy, 5.6f * s, 0f), ink, w);
-        dc.DrawLine(At(cx, cy, 4.2f * s, barrel), At(cx, cy, 5.6f * s, 0f), ink, w);
+        // The icon is square; centre it in the pill and keep a hair of air around it.
+        float d = MathF.Min(box.Width, box.Height) - 4f * s;
+        float side = d * Interop.BlenderDropper.Size / 30f;   // the art's own 1px margin
+        float cell = side / Interop.BlenderDropper.Size;       // device px per mask pixel
+        float ox = box.X + (box.Width - side) / 2f, oy = box.Y + (box.Height - side) / 2f;
+        var brush = res.Brush(SystemTheme.Ink);
+        for (int y = 0; y < Interop.BlenderDropper.Size; y++)
+            for (int x = 0; x < Interop.BlenderDropper.Size; x++)
+                if (Interop.BlenderDropper.Lit(x, y))
+                    dc.FillRectangle(new RectangleF(ox + x * cell, oy + y * cell, cell + 0.5f, cell + 0.5f), brush);
     }
 
     static RectangleF S(RectangleF r, float s) => new(r.X * s, r.Y * s, r.Width * s, r.Height * s);

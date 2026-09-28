@@ -1347,11 +1347,14 @@ public static class SelfTest
                                             cw.CommitComposition();
                                         }
                                         var px = cw.Surface.CaptureToPixels(fhost.Device);
+                                        // The stroke is a 1px line, so a flat 0% curve lands
+                                        // around 54% of the picked colour. Match the hue, not
+                                        // a brightness that depends on the data.
                                         int hit = CountPixels(px, cw.Surface.Width, cw.Surface.Height,
                                             x => true, y => y > 50,
-                                            (r, g, b) => r > 200 && g > 30 && g < 90 && b < 70);
+                                            (r, g, b) => r > 100 && g < 90 && b < 90 && r > g * 2 && r > b * 2);
                                         Check(hit > 40, "a picked line colour reaches the curve",
-                                            $"{hit} px of {Pick} in the plot (0 means the chip changed but the graph did not)");
+                                            $"{hit} px tinted {Pick} in the plot (0 means the chip changed but the graph did not)");
                                         cw.Surface.CaptureToBmp(fhost.Device,
                                             System.IO.Path.Combine(captureDir, "30-card-Gpu-recolor.bmp"));
                                     }

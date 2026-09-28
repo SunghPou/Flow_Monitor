@@ -21,33 +21,34 @@ public enum PickerPart
 public static class ColorPickerLayout
 {
     public const float CardW = 320f;
-    public const float CardH = 456f;
+    public const float CardH = 400f;
     public const float Pad = 28f;
     public const float Radius = 30f;
 
     /// <summary>Wheel centre; the wheel is a disc that fills its own box.</summary>
-    public static readonly PointF Center = new(CardW / 2f, 192f);
+    public static readonly PointF Center = new(CardW / 2f, 136f);
     public const float WheelR = 112f;
     public const float MarkerR = 9f;
     public const float MarkerStroke = 2f;
 
     // Vertical rhythm: 24 of air at the top and at the bottom, 20 between the major
-    // blocks, 16 above the fields and 10 between a field and its label.
-    public const float ValueY = 324f;
+    // blocks, 16 above the fields and 10 between a field and its label. The card has
+    // no title, so the wheel starts at the top pad.
+    public const float ValueY = 268f;
     public const float ValueH = 16f;
-    public const float DividerY = 360f;
-    public const float PillY = 376f;
+    public const float DividerY = 304f;
+    public const float PillY = 320f;
     public const float PillH = 28f;
     public const float HexW = 68f;
     public const float Cxw = 39f;
     public const float PillGap = 5f;
-    public const float LabelY = 414f;
+    public const float LabelY = 358f;
     public const float LabelH = 18f;
-    public const float DropW = 20f;
+    /// <summary>As tall as the value fields, wide enough for Blender's 32px dropper art.</summary>
+    public const float DropW = 36f;
     /// <summary>Inner left padding so a field value never touches its box edge.</summary>
     public const float FieldPad = 8f;
 
-    public static RectangleF Title => new(Pad + 6f, 24f, CardW - Pad * 2f, 36f);
     public static RectangleF Card => new(0f, 0f, CardW, CardH);
 
     /// <summary>The value track: black at the left, the full hue at the right.</summary>
