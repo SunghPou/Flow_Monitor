@@ -40,9 +40,15 @@ public static class EyedropperCursor
     [StructLayout(LayoutKind.Sequential)]
     struct BITMAPINFOHEADER
     {
-        public uint biSize, biWidth, biHeight, biPlanes, biBitCount, biCompression;
+        // biPlanes and biBitCount are WORDs: as uints the header is 44 bytes
+        // instead of 40 and CreateDIBSection refuses it.
+        public uint biSize;
+        public int biWidth, biHeight;
+        public ushort biPlanes, biBitCount;
+        public uint biCompression;
         public uint biSizeImage;
-        public int biXPelsPerMeter, biYPelsPerMeter, biClrUsed, biClrImportant;
+        public int biXPelsPerMeter, biYPelsPerMeter;
+        public uint biClrUsed, biClrImportant;
     }
 
     const uint BI_RGB = 0;
@@ -91,12 +97,16 @@ public static class EyedropperCursor
             },
         };
         IntPtr dc = CreateCompatibleDC(IntPtr.Zero);
-        if (dc == IntPtr.Zero) return IntPtr.Zero;
+        if (dc == IntPtr.Zero) { Log.Warn("eyedropper cursor: no compatible dc"); return IntPtr.Zero; }
         IntPtr bmp = IntPtr.Zero, bits = IntPtr.Zero, cursor = IntPtr.Zero;
         try
         {
             bmp = CreateDIBSection(dc, ref info, DIB_RGB_COLORS, out bits, IntPtr.Zero, 0);
-            if (bmp == IntPtr.Zero || bits == IntPtr.Zero) return IntPtr.Zero;
+            if (bmp == IntPtr.Zero || bits == IntPtr.Zero)
+            {
+                Log.Warn("eyedropper cursor: no DIB section " + Marshal.GetLastWin32Error());
+                return IntPtr.Zero;
+            }
             Fill(bits);
             // The DIB holds the XOR plane first and the AND plane below it; the cursor
             // copies both bit planes, so the section is deleted right after.
@@ -104,7 +114,8 @@ public static class EyedropperCursor
             IntPtr xorBits = bits, andBits = IntPtr.Add(bits, Size * stride);
             cursor = CreateCursor(Native.GetModuleHandle(null), HotX, HotY,
                 Size, Size, andBits, xorBits);
-            if (cursor == IntPtr.Zero) return IntPtr.Zero;
+            if (cursor == IntPtr.Zero)
+                Log.Warn("eyedropper cursor: CreateCursor failed " + Marshal.GetLastWin32Error());
         }
         catch (Exception ex)
         {

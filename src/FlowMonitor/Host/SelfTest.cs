@@ -103,6 +103,22 @@ public static class SelfTest
                             light ? "31-picker-light.bmp" : "31-picker-dark.bmp"));
                         Log.Info($"captured picker ({(light ? "light" : "dark")} theme)");
                     }
+                    // The shader's clip-space y runs up while bitmap rows run down; a
+                    // sign error there mirrors the wheel and no mapping assert can see
+                    // it, so the rendered pixels are checked: cyan top, red bottom.
+                    var wheelPx = pick.CaptureToPixels(device);
+                    int pw = pick.Width;
+                    var cc = ColorPickerLayout.Center;
+                    float ro = ColorPickerLayout.WheelR - 22f;
+                    bool Probe(float qx, float qy, Func<byte, byte, byte, bool> ok)
+                    {
+                        int i = ((int)qy * pw + (int)qx) * 4;
+                        return ok(wheelPx[i + 2], wheelPx[i + 1], wheelPx[i]);
+                    }
+                    bool topCyan = Probe(cc.X, cc.Y - ro, (r, g, b) => g > 150 && b > 150 && r < 120);
+                    bool botRed = Probe(cc.X, cc.Y + ro, (r, g, b) => r > 150 && g < 120 && b < 120);
+                    Check(topCyan && botRed, "rendered wheel puts cyan at the top and red at the bottom",
+                        $"top ({cc.X:0},{cc.Y - ro:0}) cyan={topCyan}, bottom ({cc.X:0},{cc.Y + ro:0}) red={botRed}");
                 }
                 catch (Exception ex) { Log.Write("ERROR", "picker sheet: " + ex); }
                 finally
@@ -811,6 +827,12 @@ public static class SelfTest
                     && Math.Abs(dark.G - dark.R) < 0.002f && Math.Abs(dark.B - dark.R) < 0.002f,
                     "picker card fill follows the system theme",
                     $"dark #424242 -> {dark.R * 255:0} ({dark.G * 255:0},{dark.B * 255:0}), light #CCCCCC -> {light.R * 255:0}");
+
+                // The pipette pointer is built at runtime from Blender's icon; a zero
+                // handle means Apply silently falls back to the arrow and the cursor
+                // never visibly changes, which is exactly the reported failure.
+                Check(Interop.EyedropperCursor.Handle != IntPtr.Zero, "eyedropper cursor handle builds",
+                    $"handle=0x{Interop.EyedropperCursor.Handle.ToInt64():X}");
 
                 // The header is the whole upper band: every element takes its y from one
                 // centre, the middle of the space between the top edge and the first line.

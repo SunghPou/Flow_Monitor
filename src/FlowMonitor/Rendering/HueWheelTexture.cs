@@ -56,7 +56,10 @@ float4 PSMain(VSOut i) : SV_Target
     float2 p = (i.uv - 0.5) * 2.0;
     float r = length(p);
     // Red at the bottom, hue running clockwise, matching ColorPickerLayout.HsFromPoint.
-    float h = atan2(p.x, -p.y) / 6.2831853 + 0.5;
+    // Bitmap rows run DOWN from the centre while clip-space y runs UP, so p.y is
+    // already the negation the CPU loop spells as -dy: atan2(p.x, p.y) here equals
+    // atan2(dx, -dy) there, and the +0.5 is HsFromPoint's +180 degrees.
+    float h = atan2(p.x, p.y) / 6.2831853 + 0.5;
     h = h - floor(h);
     float3 rgb = Hsv2Rgb(h, clamp(r, 0.0, 1.0), 1.0);
 #ifdef LINEAR_SPACE
@@ -124,12 +127,10 @@ float4 PSMain(VSOut i) : SV_Target
             ctx.VSSetShader(vs);
             ctx.PSSetShader(ps);
             ctx.Draw(6, 0);
-            // The DXGI surface is wrapped by another device immediately, so the draw has
-            // to have left the context before CreateBitmapFromDxgiSurface reads it.
-            // D2D's device context owns the shared immediate context and overwrites the
-            // pipeline state behind our back, so the drawn surface cannot be handed to it
-            // directly. The wheel is still drawn by the GPU; only the hand-off is a
-            // staged readback, which happens once per (size, working space).
+            // The wheel is drawn by the GPU; only the hand-off to D2D is a staged
+            // readback (CopyResource plus a CPU map into a D2D bitmap), which happens
+            // once per (size, working space). D2D rejects a surface rendered on a
+            // foreign device, so sharing the texture directly is not an option.
             using var staging = d3d.CreateTexture2D(new Texture2DDescription
             {
                 Width = (uint)n,
