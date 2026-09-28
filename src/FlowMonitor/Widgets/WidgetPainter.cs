@@ -22,6 +22,12 @@ public static class WidgetPainter
     /// </summary>
     public const float BadgeInk = 0.31f;
     /// <summary>
+    /// The cross is drawn at 0.88 of the reserved ink so its optical weight matches the
+    /// tick: at 45 degrees its bars project wider and cover more area, so equal measured
+    /// ink extents still read as a heavier X next to the check.
+    /// </summary>
+    public const float XOpticalScale = 0.88f;
+    /// <summary>
     /// Drawn half-extent of a badge glyph in logical px at full ease. HeaderLayout
     /// reserves exactly this, so a badge is anchored on its real ink (docs/design.md 15).
     /// </summary>
@@ -102,8 +108,10 @@ public static class WidgetPainter
         dc.PushAxisAlignedClip(new RectF(0, 0, width, height), AntialiasMode.Aliased);
 
         // One filled outline at the standard weight: two crossing strokes double-composite
-        // where they meet, and a short fat one reads as a blob.
-        float half = size * BadgeInk;
+        // where they meet, and a short fat one reads as a blob. The cross is drawn a little
+        // smaller than its reserved box: a 45-degree bar covers more area than the tick at
+        // the same ink extent, so equal ink extents still read as a heavier X.
+        float half = size * BadgeInk * XOpticalScale;
         var glyph = res.Brush(new Color4(1f, 1f, 1f, amount * (0.5f + 0.5f * hover)));
         FillAll(dc, GlyphGeometry.Build(res, () => GlyphGeometry.X(center, half)), glyph);
         dc.PopAxisAlignedClip();
