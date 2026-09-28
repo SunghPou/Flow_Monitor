@@ -88,6 +88,7 @@ internal static class ColorPickerWindow
                     return new IntPtr(0);
 
                 case Native.WM_TIMER:
+                    Log.Info($"picker: timer wParam={wParam.ToInt64()}");
                     if (wParam == 1) OnFrame();
                     else if (wParam == PickTimerId) OnPickTimer();
                     return new IntPtr(0);
@@ -189,7 +190,12 @@ internal static class ColorPickerWindow
     static void NotifyChanged()
     {
         _dirty = true;
-        _pushDirty = true;
+        // The live preview is pushed here, not from the frame timer: it costs one colour
+        // write and a repaint request, and deferring it makes the graph lag behind (or
+        // ignore) the card when the timer never lands.
+        string hex = Current().ToHexWithAlpha();
+        Log.Info("picker: push " + hex + " sink=" + (_onChanged is null ? "null" : "set"));
+        _onChanged?.Invoke(hex);
         if (_timerOn || _hwnd == IntPtr.Zero) return;
         _timerOn = true;
         Native.SetTimer(_hwnd, 1, FrameMs, IntPtr.Zero);
@@ -203,7 +209,6 @@ internal static class ColorPickerWindow
         if (_pushDirty)
         {
             _pushDirty = false;
-            _onChanged?.Invoke(Current().ToHexWithAlpha());
         }
         if (!_dirty) return;
         _dirty = false;
@@ -440,6 +445,9 @@ internal static class ColorPickerWindow
                 if (r <= 0) break;
                 Native.TranslateMessage(ref msg);
                 Native.DispatchMessageW(ref msg);
+                // Windows re-asserts the cursor of whatever window the pointer is over on
+                // every move, so the pipette is pushed back after each dispatch.
+                Interop.EyedropperCursor.Apply(true);
             }
         }
         finally

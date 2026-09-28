@@ -146,14 +146,17 @@ public static class ColorPickerLayout
         double dist = MathF.Sqrt(dx * dx + dy * dy);
         double s = dist < WheelR ? dist / WheelR : 1.0;
         double ang = Math.Atan2(dx, -dy);            // 0 at the top, growing clockwise
-        double h = (ang / (2.0 * Math.PI)) * 360.0;
+        // The reference card puts red at the BOTTOM, so hue starts there and runs
+        // clockwise: yellow on the left, cyan at the top, blue on the right.
+        double h = (ang / (2.0 * Math.PI)) * 360.0 + 180.0;
         return ((h % 360.0 + 360.0) % 360.0, s);
     }
 
     public static PointF PointFromHs(double hue, double sat)
     {
         double r = Math.Clamp(sat, 0.0, 1.0) * WheelR;
-        double ang = hue * Math.PI / 180.0;
+        // Inverse of HsFromPoint's +180: 0 degrees is the bottom of the wheel.
+        double ang = (hue - 180.0) * Math.PI / 180.0;
         return new PointF(
             Center.X + (float)(r * Math.Sin(ang)),
             Center.Y - (float)(r * Math.Cos(ang)));

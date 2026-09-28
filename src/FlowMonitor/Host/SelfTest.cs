@@ -714,12 +714,12 @@ public static class SelfTest
                 // (https://projects.blender.org/blender/blender/raw/main/source/blender/editors/interface/interface_widgets.cc
                 // hsvcircle_vals_from_pos), and the radius is saturation.
                 var c = ColorPickerLayout.Center;
-                double h12 = ColorPickerLayout.HsFromPoint(c.X, c.Y - 90f).H;
-                double h3 = ColorPickerLayout.HsFromPoint(c.X + 90f, c.Y).H;
-                double h6 = ColorPickerLayout.HsFromPoint(c.X, c.Y + 90f).H;
-                Check(Math.Abs(h12) < 0.01 && Math.Abs(h3 - 90) < 0.01 && Math.Abs(h6 - 180) < 0.01,
-                    "wheel puts red at 12 o'clock and runs the reference order",
-                    $"12 o'clock {h12:0.0} deg, 3 o'clock {h3:0.0}, 6 o'clock {h6:0.0}");
+                double hTop = ColorPickerLayout.HsFromPoint(c.X, c.Y - 90f).H;
+                double hRight = ColorPickerLayout.HsFromPoint(c.X + 90f, c.Y).H;
+                double hBottom = ColorPickerLayout.HsFromPoint(c.X, c.Y + 90f).H;
+                Check(Math.Abs(hBottom) < 0.01 && Math.Abs(hRight - 270) < 0.01 && Math.Abs(hTop - 180) < 0.01,
+                    "wheel puts red at the bottom and runs the reference order clockwise",
+                    $"bottom {hBottom:0.0} deg, top {hTop:0.0}, right {hRight:0.0}");
 
                 double satOut = ColorPickerLayout.HsFromPoint(c.X + ColorPickerLayout.WheelR + 40f, c.Y).S;
                 double satMid = ColorPickerLayout.HsFromPoint(c.X, c.Y).S;

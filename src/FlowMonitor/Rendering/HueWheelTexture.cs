@@ -45,7 +45,8 @@ float4 PSMain(VSOut i) : SV_Target
 {
     float2 p = (i.uv - 0.5) * 2.0;
     float r = length(p);
-    float h = atan2(p.x, -p.y) / 6.2831853;
+    // Red at the bottom, hue running clockwise, matching ColorPickerLayout.HsFromPoint.
+    float h = atan2(p.x, -p.y) / 6.2831853 + 0.5;
     h = h - floor(h);
     float3 rgb = Hsv2Rgb(h, clamp(r, 0.0, 1.0), 1.0);
 #ifdef LINEAR_SPACE
