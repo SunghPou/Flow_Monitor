@@ -26,7 +26,7 @@ public sealed class Telemetry : IDisposable
     volatile bool _running;
     int _intervalMs = 1000;
     readonly System.Diagnostics.Stopwatch _clock = System.Diagnostics.Stopwatch.StartNew();
-    readonly List<double> _tickTimes = new();
+    double _prevTick = double.NaN, _lastDelta;
 
     public event Action? Sampled;
 
@@ -77,8 +77,8 @@ public sealed class Telemetry : IDisposable
     }
 
     /// <summary>
-    /// Median seconds between recent samples (MC progress runs on the measured tick, not
-    /// the configured interval). Falls back to the configured interval until 3 ticks land.
+    /// Last measured seconds between samples (MC progress runs on the measured tick, not
+    /// the configured interval). Falls back to the configured interval until 2 ticks land.
     /// </summary>
     public double SampleIntervalSec
     {
@@ -86,15 +86,7 @@ public sealed class Telemetry : IDisposable
         {
             lock (_gate)
             {
-                if (_tickTimes.Count >= 3)
-                {
-                    var deltas = new List<double>(_tickTimes.Count - 1);
-                    for (int i = 1; i < _tickTimes.Count; i++)
-                        deltas.Add(_tickTimes[i] - _tickTimes[i - 1]);
-                    deltas.Sort();
-                    double median = deltas[deltas.Count / 2];
-                    if (median > 0.01 && median < 30) return Math.Max(0.05, median);
-                }
+                if (_lastDelta > 0.01 && _lastDelta < 30) return Math.Max(0.05, _lastDelta);
                 return Math.Max(0.05, _intervalMs / 1000.0);
             }
         }
@@ -164,8 +156,8 @@ public sealed class Telemetry : IDisposable
         double now = Time;
         lock (_gate)
         {
-            _tickTimes.Add(now);
-            while (_tickTimes.Count > 8) _tickTimes.RemoveAt(0);
+            if (!double.IsNaN(_prevTick)) _lastDelta = now - _prevTick;
+            _prevTick = now;
         }
         try { Cpu.Update(now); } catch (Exception ex) { Log.Warn("cpu sample: " + ex.Message); }
         try { Memory.Update(now); } catch (Exception ex) { Log.Warn("memory sample: " + ex.Message); }
