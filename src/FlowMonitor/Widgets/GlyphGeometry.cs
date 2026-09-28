@@ -150,6 +150,36 @@ public static class GlyphGeometry
 
     /// <summary>
     /// Blender's eyedropper, walked from release/datafiles/icons_svg/eyedropper.svg
+    /// (GPL-2.0-or-later, reference only). First pair is the start point, then
+    /// 0 is a line (x y) and 1 is a cubic (ax ay bx by x y). The card icon and
+    /// the cursor both walk this, so the art has one definition.
+    /// </summary>
+    internal static readonly float[] DropperWalk =
+    [
+        206.727f, 599.000f, 1, 206.533f, 598.996f, 206.340f, 599.013f, 206.152f, 599.051f, 1, 205.402f, 599.201f, 204.705f, 599.629f,
+        204.146f, 600.188f, 0, 202.002f, 602.295f, 0, 200.854f, 601.146f, 0, 200.700f, 601.018f, 0, 200.562f, 601.088f, 0, 200.262f,
+        601.008f, 0, 200.075f, 600.999f, 0, 199.899f, 601.060f, 0, 199.757f, 601.180f, 0, 199.669f, 601.345f, 0, 199.648f, 601.530f, 0,
+        199.695f, 601.710f, 0, 199.806f, 601.860f, 0, 199.963f, 601.960f, 0, 200.147f, 601.994f, 0, 201.793f, 603.500f, 0, 197.145f,
+        608.189f, 0, 196.918f, 608.123f, 0, 196.745f, 608.051f, 0, 196.557f, 608.049f, 0, 196.381f, 608.116f, 0, 196.243f, 608.243f, 0,
+        196.161f, 608.412f, 0, 196.148f, 608.600f, 0, 196.205f, 608.779f, 0, 196.323f, 608.924f, 0, 196.488f, 609.016f, 0, 196.674f,
+        609.040f, 0, 196.856f, 608.994f, 0, 197.008f, 608.884f, 0, 197.109f, 608.726f, 0, 197.145f, 608.541f, 0, 197.000f, 609.334f, 0,
+        195.146f, 611.187f, 0, 195.054f, 611.337f, 0, 195.009f, 611.505f, 0, 195.024f, 611.678f, 0, 195.097f, 611.835f, 0, 195.220f,
+        611.958f, 0, 195.378f, 612.031f, 0, 195.551f, 612.046f, 0, 195.718f, 612.001f, 0, 195.861f, 611.902f, 0, 197.854f, 609.895f, 0,
+        198.081f, 609.960f, 0, 198.254f, 610.031f, 0, 198.442f, 610.033f, 0, 198.618f, 609.966f, 0, 198.756f, 609.838f, 0, 198.837f,
+        609.669f, 0, 198.850f, 609.482f, 0, 198.793f, 609.303f, 0, 198.674f, 609.157f, 0, 198.510f, 609.066f, 0, 198.324f, 609.042f, 0,
+        198.142f, 609.088f, 0, 197.990f, 609.198f, 0, 197.889f, 609.357f, 0, 197.854f, 609.541f, 0, 198.000f, 608.746f, 0, 202.502f,
+        604.209f, 0, 203.795f, 605.502f, 0, 199.291f, 610.041f, 0, 198.500f, 610.041f, 0, 198.298f, 610.065f, 0, 198.147f, 610.041f, 0,
+        196.146f, 612.187f, 0, 196.054f, 612.337f, 0, 196.009f, 612.505f, 0, 196.024f, 612.678f, 0, 196.097f, 612.835f, 0, 196.220f,
+        612.958f, 0, 196.378f, 613.031f, 0, 196.551f, 613.046f, 0, 196.718f, 613.001f, 0, 196.861f, 612.902f, 0, 198.707f, 611.041f, 0,
+        199.500f, 611.041f, 0, 199.703f, 611.017f, 0, 199.855f, 611.041f, 0, 204.502f, 606.209f, 0, 206.146f, 607.854f, 0, 206.302f,
+        607.969f, 0, 206.493f, 608.007f, 0, 206.684f, 607.969f, 0, 206.847f, 607.861f, 0, 206.955f, 607.698f, 0, 206.993f, 607.507f, 0,
+        206.955f, 607.316f, 0, 206.847f, 607.153f, 0, 205.711f, 606.004f, 0, 207.850f, 603.898f, 0, 207.854f, 603.894f, 1, 208.413f,
+        603.336f, 208.840f, 602.639f, 208.990f, 601.889f, 1, 209.140f, 601.138f, 208.971f, 600.305f, 208.354f, 599.687f, 1, 207.890f,
+        599.224f, 207.306f, 599.013f, 206.727f, 599.000f,
+    ];
+
+    /// <summary>
+    /// Blender's eyedropper, walked from release/datafiles/icons_svg/eyedropper.svg
     /// (GPL-2.0-or-later, reference only). The single path is already in Blender's 16-unit
     /// design box and is emitted as one closed contour, so the icon is the upstream shape
     /// rather than an approximation of it. `side` is the icon's box in pixels; the path's
@@ -164,104 +194,23 @@ public static class GlyphGeometry
             c.Y + ((y - Y0) / (Y1 - Y0) - 0.5f) * side);
         Pending.Add(sink =>
         {
-            sink.BeginFigure(P(206.727f, 599.000f), FigureBegin.Filled);
-            sink.AddBezier(new BezierSegment(P(206.533f, 598.996f), P(206.340f, 599.013f), P(206.152f, 599.051f)));
-            sink.AddBezier(new BezierSegment(P(205.402f, 599.201f), P(204.705f, 599.629f), P(204.146f, 600.188f)));
-            sink.AddLine(P(202.002f, 602.295f));
-            sink.AddLine(P(200.854f, 601.146f));
-            sink.AddLine(P(200.700f, 601.018f));
-            sink.AddLine(P(200.562f, 601.088f));
-            sink.AddLine(P(200.262f, 601.008f));
-            sink.AddLine(P(200.075f, 600.999f));
-            sink.AddLine(P(199.899f, 601.060f));
-            sink.AddLine(P(199.757f, 601.180f));
-            sink.AddLine(P(199.669f, 601.345f));
-            sink.AddLine(P(199.648f, 601.530f));
-            sink.AddLine(P(199.695f, 601.710f));
-            sink.AddLine(P(199.806f, 601.860f));
-            sink.AddLine(P(199.963f, 601.960f));
-            sink.AddLine(P(200.147f, 601.994f));
-            sink.AddLine(P(201.793f, 603.500f));
-            sink.AddLine(P(197.145f, 608.189f));
-            sink.AddLine(P(196.918f, 608.123f));
-            sink.AddLine(P(196.745f, 608.051f));
-            sink.AddLine(P(196.557f, 608.049f));
-            sink.AddLine(P(196.381f, 608.116f));
-            sink.AddLine(P(196.243f, 608.243f));
-            sink.AddLine(P(196.161f, 608.412f));
-            sink.AddLine(P(196.148f, 608.600f));
-            sink.AddLine(P(196.205f, 608.779f));
-            sink.AddLine(P(196.323f, 608.924f));
-            sink.AddLine(P(196.488f, 609.016f));
-            sink.AddLine(P(196.674f, 609.040f));
-            sink.AddLine(P(196.856f, 608.994f));
-            sink.AddLine(P(197.008f, 608.884f));
-            sink.AddLine(P(197.109f, 608.726f));
-            sink.AddLine(P(197.145f, 608.541f));
-            sink.AddLine(P(197.000f, 609.334f));
-            sink.AddLine(P(195.146f, 611.187f));
-            sink.AddLine(P(195.054f, 611.337f));
-            sink.AddLine(P(195.009f, 611.505f));
-            sink.AddLine(P(195.024f, 611.678f));
-            sink.AddLine(P(195.097f, 611.835f));
-            sink.AddLine(P(195.220f, 611.958f));
-            sink.AddLine(P(195.378f, 612.031f));
-            sink.AddLine(P(195.551f, 612.046f));
-            sink.AddLine(P(195.718f, 612.001f));
-            sink.AddLine(P(195.861f, 611.902f));
-            sink.AddLine(P(197.854f, 609.895f));
-            sink.AddLine(P(198.081f, 609.960f));
-            sink.AddLine(P(198.254f, 610.031f));
-            sink.AddLine(P(198.442f, 610.033f));
-            sink.AddLine(P(198.618f, 609.966f));
-            sink.AddLine(P(198.756f, 609.838f));
-            sink.AddLine(P(198.837f, 609.669f));
-            sink.AddLine(P(198.850f, 609.482f));
-            sink.AddLine(P(198.793f, 609.303f));
-            sink.AddLine(P(198.674f, 609.157f));
-            sink.AddLine(P(198.510f, 609.066f));
-            sink.AddLine(P(198.324f, 609.042f));
-            sink.AddLine(P(198.142f, 609.088f));
-            sink.AddLine(P(197.990f, 609.198f));
-            sink.AddLine(P(197.889f, 609.357f));
-            sink.AddLine(P(197.854f, 609.541f));
-            sink.AddLine(P(198.000f, 608.746f));
-            sink.AddLine(P(202.502f, 604.209f));
-            sink.AddLine(P(203.795f, 605.502f));
-            sink.AddLine(P(199.291f, 610.041f));
-            sink.AddLine(P(198.500f, 610.041f));
-            sink.AddLine(P(198.298f, 610.065f));
-            sink.AddLine(P(198.147f, 610.041f));
-            sink.AddLine(P(196.146f, 612.187f));
-            sink.AddLine(P(196.054f, 612.337f));
-            sink.AddLine(P(196.009f, 612.505f));
-            sink.AddLine(P(196.024f, 612.678f));
-            sink.AddLine(P(196.097f, 612.835f));
-            sink.AddLine(P(196.220f, 612.958f));
-            sink.AddLine(P(196.378f, 613.031f));
-            sink.AddLine(P(196.551f, 613.046f));
-            sink.AddLine(P(196.718f, 613.001f));
-            sink.AddLine(P(196.861f, 612.902f));
-            sink.AddLine(P(198.707f, 611.041f));
-            sink.AddLine(P(199.500f, 611.041f));
-            sink.AddLine(P(199.703f, 611.017f));
-            sink.AddLine(P(199.855f, 611.041f));
-            sink.AddLine(P(204.502f, 606.209f));
-            sink.AddLine(P(206.146f, 607.854f));
-            sink.AddLine(P(206.302f, 607.969f));
-            sink.AddLine(P(206.493f, 608.007f));
-            sink.AddLine(P(206.684f, 607.969f));
-            sink.AddLine(P(206.847f, 607.861f));
-            sink.AddLine(P(206.955f, 607.698f));
-            sink.AddLine(P(206.993f, 607.507f));
-            sink.AddLine(P(206.955f, 607.316f));
-            sink.AddLine(P(206.847f, 607.153f));
-            sink.AddLine(P(205.711f, 606.004f));
-            sink.AddLine(P(207.850f, 603.898f));
-            sink.AddLine(P(207.854f, 603.894f));
-            sink.AddBezier(new BezierSegment(P(208.413f, 603.336f), P(208.840f, 602.639f), P(208.990f, 601.889f)));
-            sink.AddBezier(new BezierSegment(P(209.140f, 601.138f), P(208.971f, 600.305f), P(208.354f, 599.687f)));
-            sink.AddBezier(new BezierSegment(P(207.890f, 599.224f), P(207.306f, 599.013f), P(206.727f, 599.000f)));
+            sink.BeginFigure(P(DropperWalk[0], DropperWalk[1]), FigureBegin.Filled);
+            for (int i = 2; i < DropperWalk.Length;)
+            {
+                if (DropperWalk[i] == 0)
+                {
+                    sink.AddLine(P(DropperWalk[i + 1], DropperWalk[i + 2]));
+                    i += 3;
+                }
+                else
+                {
+                    sink.AddBezier(new BezierSegment(
+                        P(DropperWalk[i + 1], DropperWalk[i + 2]),
+                        P(DropperWalk[i + 3], DropperWalk[i + 4]),
+                        P(DropperWalk[i + 5], DropperWalk[i + 6])));
+                    i += 7;
+                }
+            }
             sink.EndFigure(FigureEnd.Closed);
        });
     }
