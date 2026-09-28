@@ -13,13 +13,21 @@ public readonly record struct Rgba
     public byte B { get; }
     public byte A { get; }
 
-    /// <summary>Parses #RGB, #RRGGBB or bare hex; anything unreadable becomes white.</summary>
+    /// <summary>Parses #RGB, #RRGGBB, #RRGGBBAA or bare hex; anything unreadable becomes white.</summary>
     public static Rgba FromHex(string? hex)
     {
         string h = (hex ?? "").Trim().TrimStart('#');
         if (h.Length == 3) h = string.Concat(h[0], h[0], h[1], h[1], h[2], h[2]);
-        if (h.Length != 6) return new Rgba(255, 255, 255);
-        return new Rgba(Hex(h, 0), Hex(h, 2), Hex(h, 4));
+        if ((h.Length != 6 && h.Length != 8) || !IsHex(h)) return new Rgba(255, 255, 255);
+        return h.Length == 8
+            ? new Rgba(Hex(h, 0), Hex(h, 2), Hex(h, 4), Hex(h, 6))
+            : new Rgba(Hex(h, 0), Hex(h, 2), Hex(h, 4));
+    }
+
+    static bool IsHex(string h)
+    {
+        foreach (char c in h) if (!Uri.IsHexDigit(c)) return false;
+        return true;
     }
 
     static byte Hex(string h, int at) =>
@@ -29,6 +37,25 @@ public readonly record struct Rgba
     public string ToHex() => $"#{R:X2}{G:X2}{B:X2}";
 
     public Hsv ToHsv() => Hsv.FromRgb(R, G, B);
+
+    /// <summary>
+    /// #RRGGBB, or #RRGGBBAA once the colour is translucent (Blender's hex field is
+    /// sRGB and grows the alpha pair as soon as the colour has alpha).
+    /// </summary>
+    public string ToHexWithAlpha() => A == 255 ? ToHex() : $"#{R:X2}{G:X2}{B:X2}{A:X2}";
+
+    public Rgba WithAlpha(byte a) => new(R, G, B, a);
+
+    /// <summary>The same colour in Blender's Linear working space.</summary>
+    public Rgba ToLinear() => new(
+        ColorTransfer.Byte(ColorTransfer.SrgbToLinear(R / 255.0)),
+        ColorTransfer.Byte(ColorTransfer.SrgbToLinear(G / 255.0)),
+        ColorTransfer.Byte(ColorTransfer.SrgbToLinear(B / 255.0)), A);
+
+    public static Rgba FromLinear(byte r, byte g, byte b, byte a = 255) => new(
+        ColorTransfer.Byte(ColorTransfer.LinearToSrgb(r / 255.0)),
+        ColorTransfer.Byte(ColorTransfer.LinearToSrgb(g / 255.0)),
+        ColorTransfer.Byte(ColorTransfer.LinearToSrgb(b / 255.0)), a);
 
     public Color4 ToColor4() => new(R / 255f, G / 255f, B / 255f, A / 255f);
 
@@ -74,6 +101,23 @@ public readonly record struct Hsv(double H, double S, double V)
         return new Hsv(h, d / max, max).Normalized();
     }
 
+}
+
+/// <summary>
+/// sRGB transfer function both ways, for the picker's Perceptual/Linear working
+/// space (Blender's scene-linear vs colour-picking space).
+/// </summary>
+public static class ColorTransfer
+{
+    public static double SrgbToLinear(double c) => c <= 0.04045
+        ? c / 12.92
+        : Math.Pow((c + 0.055) / 1.055, 2.4);
+
+    public static double LinearToSrgb(double c) => c <= 0.0031308
+        ? 12.92 * c
+        : 1.055 * Math.Pow(c, 1.0 / 2.4) - 0.055;
+
+    public static byte Byte(double c) => (byte)Math.Clamp(Math.Round(c * 255.0), 0.0, 255.0);
 }
 
 /// <summary>System theme lookup and the picker's theme-following palette.</summary>
@@ -125,4 +169,6 @@ public static class SystemTheme
                                           : new Color4(1f, 1f, 1f, 0.10f);
     public static Color4 Field => IsLight() ? new Color4(1f, 1f, 1f, 0.55f)
                                            : new Color4(0f, 0f, 0f, 0.25f);
+    /// <summary>Blender's selected-segment blue; the mode rows read as a real choice.</summary>
+    public static Color4 Accent => new(0.278f, 0.447f, 0.702f, 1f);   // #4772B3
 }

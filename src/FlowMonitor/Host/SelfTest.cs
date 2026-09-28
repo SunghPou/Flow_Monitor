@@ -754,26 +754,50 @@ public static class SelfTest
                     $"bar at x {ColorPickerLayout.ValueTrack.Left:0}..{ColorPickerLayout.ValueTrack.Right:0} ({ColorPickerLayout.ValueTrack.Width:0}px wide) beside a wheel ending at {ColorPickerLayout.Center.X + ColorPickerLayout.WheelR:0}");
 
                 var g0 = ColorPickerLayout.Groove(0);
-                Check(Math.Abs(ColorPickerLayout.ChannelFromX(0, ColorPickerLayout.XFromChannel(0, 200)) - 200) <= 1
-                    && ColorPickerLayout.XFromChannel(0, 0) >= g0.Left - 0.01f
-                    && ColorPickerLayout.XFromChannel(0, 255) <= g0.Right + 0.01f,
-                    "channel groove and its handle are inverses",
-                    $"channel 200 -> x {ColorPickerLayout.XFromChannel(0, 200):0.0} -> {ColorPickerLayout.ChannelFromX(0, ColorPickerLayout.XFromChannel(0, 200))}, groove {g0.Left:0}..{g0.Right:0}");
+                Check(Math.Abs(ColorPickerLayout.SliderFromX(0, ColorPickerLayout.XFromSlider(0, 0.62)) - 0.62) < 0.002
+                    && ColorPickerLayout.XFromSlider(0, 0) >= g0.Left - 0.01f
+                    && ColorPickerLayout.XFromSlider(0, 1) <= g0.Right + 0.01f,
+                    "slider groove and its handle are inverses",
+                    $"slider 0.62 -> x {ColorPickerLayout.XFromSlider(0, 0.62):0.0} -> {ColorPickerLayout.SliderFromX(0, ColorPickerLayout.XFromSlider(0, 0.62)):0.000}, groove {g0.Left:0}..{g0.Right:0}");
+
+                // The card is Blender's, row for row: the wheel row, the two mode rows,
+                // four sliders, then the hex field and the dropper, all inside the card.
+                float lastBottom = ColorPickerLayout.Slider(3).Bottom;
+                Check(Math.Abs(ColorPickerLayout.HexY - lastBottom - 10f) < 0.01f
+                    && Math.Abs(ColorPickerLayout.HexY + ColorPickerLayout.RowH + ColorPickerLayout.Pad
+                        - ColorPickerLayout.CardH) < 0.01f,
+                    "the card is the reference card, row for row",
+                    $"wheel {ColorPickerLayout.Pad:0}..{ColorPickerLayout.Pad + ColorPickerLayout.WheelD:0}, mode rows {ColorPickerLayout.SpaceRowY:0}/{ColorPickerLayout.ModelRowY:0}, four sliders {ColorPickerLayout.SliderY0:0}..{lastBottom:0}, hex row {ColorPickerLayout.HexY:0}, card {ColorPickerLayout.CardH:0} tall");
+
+                Check(Math.Abs(ColorTransfer.LinearToSrgb(ColorTransfer.SrgbToLinear(0.5)) - 0.5) < 0.002
+                    && Math.Abs(ColorTransfer.SrgbToLinear(1.0) - 1.0) < 0.002,
+                    "the Linear working space round-trips the sRGB transfer",
+                    $"0.5 linear -> {ColorTransfer.LinearToSrgb(ColorTransfer.SrgbToLinear(0.5)):0.000} perceptual");
+                Check(new Rgba(128, 128, 128).ToLinear().ToHex() == "#373737"
+                    && Rgba.FromLinear(0x37, 0x37, 0x37).ToHex() == "#808080",
+                    "a linear-space number maps to the same sRGB colour",
+                    "perceptual #808080 <-> linear #373737");
 
                 Check(ColorPickerLayout.HitTest(c.X, c.Y) == PickerPart.Wheel
                     && ColorPickerLayout.HitTest(c.X + 90f, c.Y) == PickerPart.Wheel
-                    && ColorPickerLayout.HitTest(c.X + ColorPickerLayout.WheelR + 6f, c.Y) == PickerPart.None
-                    && ColorPickerLayout.HitTest(ColorPickerLayout.ValueTrack.Left + 10f,
+                    && ColorPickerLayout.HitTest(c.X + ColorPickerLayout.WheelR + 3f, c.Y) == PickerPart.None
+                    && ColorPickerLayout.HitTest(ColorPickerLayout.ValueTrack.Left + 6f,
                         ColorPickerLayout.ValueTrack.Top + 8f) == PickerPart.Value
-                    && ColorPickerLayout.HitTest(ColorPickerLayout.Channel(1).Left + 40f,
-                        ColorPickerLayout.Channel(1).Top + 5f) == PickerPart.ChannelG
+                    && ColorPickerLayout.HitTest(ColorPickerLayout.Segment(0, 0).Left + 20f,
+                        ColorPickerLayout.SpaceRowY + 5f) == PickerPart.Space
+                    && ColorPickerLayout.HitTest(ColorPickerLayout.Segment(1, 1).Left + 20f,
+                        ColorPickerLayout.ModelRowY + 5f) == PickerPart.Model
+                    && ColorPickerLayout.HitTest(ColorPickerLayout.Slider(2).Left + 40f,
+                        ColorPickerLayout.Slider(2).Top + 5f) == PickerPart.SliderC
+                    && ColorPickerLayout.HitTest(ColorPickerLayout.Slider(3).Left + 40f,
+                        ColorPickerLayout.Slider(3).Top + 5f) == PickerPart.SliderD
                     && ColorPickerLayout.HitTest(ColorPickerLayout.Hex.Left + 10f,
                         ColorPickerLayout.Hex.Top + 5f) == PickerPart.Hex
                     && ColorPickerLayout.HitTest(ColorPickerLayout.Eyedropper.Left + 5f,
                         ColorPickerLayout.Eyedropper.Top + 5f) == PickerPart.Eyedropper
                     && ColorPickerLayout.HitTest(4f, 4f) == PickerPart.None,
-                    "hit-test agrees with what the wheel, bar, sliders and dropper draw",
-                    "inside the rim = wheel, the gap between wheel and bar = none (click-away commits), bar = value, row 1 = channel G, hex and dropper fields = themselves, corner = none");
+                    "hit-test agrees with every control the card draws",
+                    "rim = wheel, the gap between wheel and bar = none (click-away commits), bar = value, both mode rows, four sliders, hex and dropper fields, corner = none");
 
                 var dark = SystemTheme.CardFor(light: false);
                 var light = SystemTheme.CardFor(light: true);

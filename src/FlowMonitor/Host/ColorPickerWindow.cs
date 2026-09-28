@@ -9,6 +9,7 @@ using Vortice.Direct2D1;
 using Vortice.DXGI;
 using Vortice.Mathematics;
 using Picker = FlowMonitor.Widgets.ColorPickerLayout;
+using Xfer = FlowMonitor.Widgets.ColorTransfer;
 using V2 = System.Numerics.Vector2;
 using SizeI = Vortice.Mathematics.SizeI;
 
@@ -28,10 +29,13 @@ internal static class ColorPickerWindow
 
     internal delegate IntPtr PickerWndProc(IntPtr hwnd, uint msg, IntPtr wParam, IntPtr lParam);
 
-    // D2D has no polar gradient, so the wheel is a CPU bitmap.
-    static ID2D1Bitmap1? _wheelBmp;
+    // D2D has no polar gradient, so the wheel is a CPU bitmap. One per working space.
+    static ID2D1Bitmap1?[] _wheelBmp = [null, null];
     static int _wheelPx;
     static Hsv _hsv;
+    static byte _alpha = 255;
+    static PickerSpace _space = PickerSpace.Perceptual;
+    static PickerModel _model = PickerModel.Rgb;
     static PickerPart _drag = PickerPart.None;
     static bool _cancelled;
     static bool _up;
@@ -141,6 +145,9 @@ internal static class ColorPickerWindow
         _drag = PickerPart.None;
         _onChanged = onChanged;
         _hsv = Rgba.FromHex(startHex).ToHsv();
+        _alpha = Rgba.FromHex(startHex).A;
+        _space = PickerSpace.Perceptual;
+        _model = PickerModel.Rgb;
 
         host.SetMenuOpen(true);
         try { Run(host, widget, x, y); }
@@ -151,19 +158,23 @@ internal static class ColorPickerWindow
     }
 
     /// <summary>Live preview: the owner widget repaints with this colour, unsaved.</summary>
-    static void NotifyChanged() => _onChanged?.Invoke(Current().ToHex());
+    static void NotifyChanged() => _onChanged?.Invoke(Current().ToHexWithAlpha());
 
+    /// <summary>The picked colour in sRGB, which is the space the chart stores.</summary>
     static Rgba Current()
     {
         var (r, g, b) = _hsv.ToRgb();
-        return new Rgba(r, g, b);
+        return new Rgba(r, g, b, _alpha);
     }
 
-    /// <summary>Fully saturated current hue at the current value, used to tint the value track.</summary>
+    /// <summary>What the numbers show: the same colour in the card's working space.</summary>
+    static Rgba Shown() => _space == PickerSpace.Linear ? Current().ToLinear() : Current();
+
+    /// <summary>Fully saturated current hue at the current value, used to tint the value bar.</summary>
     static Rgba Pure()
     {
         var (r, g, b) = new Hsv(_hsv.H, 1.0, _hsv.V).ToRgb();
-        return new Rgba(r, g, b);
+        return new Rgba(r, g, b, _alpha);
     }
 
     static void Run(IRenderHost host, WidgetWindow widget, int x, int y)
@@ -267,6 +278,14 @@ internal static class ColorPickerWindow
         if (part == PickerPart.None) { Close(); return; }
         if (part == PickerPart.Eyedropper) { PickScreen(); return; }
         if (part == PickerPart.Hex) return;             // read-only field: no drag, no commit
+        if (part == PickerPart.Space || part == PickerPart.Model)
+        {
+            bool left = x < Picker.CardW / 2f;
+            if (part == PickerPart.Space) _space = left ? PickerSpace.Linear : PickerSpace.Perceptual;
+            else _model = left ? PickerModel.Rgb : PickerModel.Hsv;
+            Paint();
+            return;
+        }
         _drag = part;
         Apply(lParam);
         Paint();
@@ -286,13 +305,30 @@ internal static class ColorPickerWindow
         }
         else
         {
-            int channel = (int)_drag - (int)PickerPart.ChannelR;
-            if (channel is >= 0 and < 3)
+            int i = (int)_drag - (int)PickerPart.SliderA;
+            if (i is >= 0 and < 4)
             {
-                var (r, g, b) = _hsv.ToRgb();
-                byte v = Picker.ChannelFromX(channel, x);
-                if (channel == 0) r = v; else if (channel == 1) g = v; else b = v;
-                _hsv = new Rgba(r, g, b).ToHsv();
+                double t = Picker.SliderFromX(i, x);
+                if (i == 3) _alpha = Xfer.Byte(t);
+                else if (_model == PickerModel.Hsv)
+                {
+                    _hsv = (i switch
+                    {
+                        0 => new Hsv(t * 360.0, _hsv.S, _hsv.V),
+                        1 => new Hsv(_hsv.H, t, _hsv.V),
+                        _ => new Hsv(_hsv.H, _hsv.S, t),
+                    }).Normalized();
+                }
+                else
+                {
+                    var c = Shown();
+                    byte v = Xfer.Byte(t);
+                    var next = i == 0 ? new Rgba(v, c.G, c.B, c.A)
+                             : i == 1 ? new Rgba(c.R, v, c.B, c.A)
+                                      : new Rgba(c.R, c.G, v, c.A);
+                    _hsv = (_space == PickerSpace.Linear
+                        ? Rgba.FromLinear(next.R, next.G, next.B, next.A) : next).ToHsv();
+                }
             }
         }
         _hsv = _hsv.Normalized();
@@ -411,28 +447,29 @@ internal static class ColorPickerWindow
         dc.DrawRoundedRectangle(card, res.Brush(SystemTheme.Hairline), 1f * s);
 
         EnsureWheel(dc);
-        if (_wheelBmp != null)
-            dc.DrawBitmap(_wheelBmp, (RectangleF?)Square(Picker.Center, Picker.WheelR, s), 1f,
+        var wheel = _wheelBmp[(int)_space];
+        if (wheel != null)
+            dc.DrawBitmap(wheel, (RectangleF?)Square(Picker.Center, Picker.WheelR, s), 1f,
                 BitmapInterpolationMode.Linear, (RectangleF?)null);
         DrawValueVeil(dc, res, s);
 
         DrawWheelMarker(dc, res, s);
         DrawValueBar(dc, res, s);
-        DrawChannels(dc, res, s);
+        DrawModeRows(dc, res, s);
+        DrawSliders(dc, res, s);
         DrawHex(dc, res, s);
         DrawEyedropper(dc, res, s);
 
         surface.EndDrawAndPresent();
     }
 
+    /// <summary>The wheel's handle: the reference card's plain hollow white ring.</summary>
     static void DrawWheelMarker(ID2D1DeviceContext dc, ResourceCache res, float s)
     {
         var at = Picker.PointFromHs(_hsv.H, _hsv.S);
         float d = Picker.MarkerR * 2f * s;
         float x = (at.X - Picker.MarkerR) * s, y = (at.Y - Picker.MarkerR) * s;
-        dc.FillEllipse(new Ellipse(new V2(at.X * s, at.Y * s), Picker.MarkerR * s, Picker.MarkerR * s),
-            res.Brush(Current().ToColor4()));
-        // Dark outline under a white one, so the ring reads on any wheel colour.
+        // Dark outline under the white one, so the ring reads on any wheel colour.
         Ring(dc, x, y, d, res.Brush(new Color4(0f, 0f, 0f, 0.45f)), 3f * s);
         Ring(dc, x, y, d, res.Brush(new Color4(1f, 1f, 1f, 1f)), Picker.MarkerStroke * s);
     }
@@ -450,76 +487,116 @@ internal static class ColorPickerWindow
         var pure = Pure();
 
         // Black at the top, the full hue at the bottom.
+        var pureShown = _space == PickerSpace.Linear ? pure.ToLinear() : pure;
         var props = new LinearGradientBrushProperties(
             new V2(0f, track.Top), new V2(0f, track.Bottom));
         using var stops = dc.CreateGradientStopCollection(
         [
             new GradientStop(0f, new Color4(0f, 0f, 0f, 1f)),
-            new GradientStop(1f, pure.ToColor4()),
+            new GradientStop(1f, pureShown.ToColor4()),
         ], Gamma.Linear, ExtendMode.Clamp);
         using var grad = dc.CreateLinearGradientBrush(props, stops);
         float r = track.Width / 2f;
         dc.FillRoundedRectangle(new RoundedRectangle(track, r, r), grad);
 
-        float hx = track.Left + track.Width / 2f;
+        // The reference card's handle is a short white bar across the track, not a ring.
         float hy = Picker.YFromValue(_hsv.V) * s;
-        float d = Picker.MarkerR * 2 * s;
-        var white = res.Brush(new Color4(1f, 1f, 1f, 1f));
-        Ring(dc, hx - Picker.MarkerR * s, hy - Picker.MarkerR * s, d, white, Picker.MarkerStroke * s);
+        float hx = track.Left - 2f * s, hw = track.Width + 4f * s, hh = 4f * s;
+        dc.FillRoundedRectangle(new RoundedRectangle(new RectangleF(hx, hy - hh / 2f, hw, hh), hh / 2f, hh / 2f),
+            res.Brush(new Color4(1f, 1f, 1f, 1f)));
     }
 
     /// <summary>
-    /// One number-slider row per RGB channel, the way Blender lays them out under the
-    /// wheel: the label on the left, a groove filled to the channel's value with a ring
-    /// handle, and the number on the right.
+    /// Blender's two mode rows: a segmented choice between working spaces, then one
+    /// between RGB and HSV. The selected segment is filled, so the card says what the
+    /// numbers below it mean.
     /// </summary>
-    static void DrawChannels(ID2D1DeviceContext dc, ResourceCache res, float s)
+    static void DrawModeRows(ID2D1DeviceContext dc, ResourceCache res, float s)
     {
-        var cur = Current();
-        byte[] values = [cur.R, cur.G, cur.B];
-        Color4[] tints = [new(cur.R / 255f, 0.42f, 0.42f, 1f),
-                          new(0.42f, cur.G / 255f, 0.42f, 1f),
-                          new(0.42f, 0.42f, cur.B / 255f, 1f)];
-        var labelFmt = res.Format("Segoe UI Variable Text", 12f, Vortice.DirectWrite.FontWeight.Normal);
-        var valueFmt = res.Format("Segoe UI Variable Text", 12f, Vortice.DirectWrite.FontWeight.Normal);
+        var fmt = res.Format("Segoe UI Variable Text", 12f, Vortice.DirectWrite.FontWeight.Normal);
+        var ink = res.Brush(SystemTheme.Ink);
+        DrawSegment(dc, res, s, Picker.Segment(0, 0), Picker.SpaceLabels[0], _space == PickerSpace.Linear, fmt, ink);
+        DrawSegment(dc, res, s, Picker.Segment(0, 1), Picker.SpaceLabels[1], _space == PickerSpace.Perceptual, fmt, ink);
+        DrawSegment(dc, res, s, Picker.Segment(1, 0), Picker.ModelLabels[0], _model == PickerModel.Rgb, fmt, ink);
+        DrawSegment(dc, res, s, Picker.Segment(1, 1), Picker.ModelLabels[1], _model == PickerModel.Hsv, fmt, ink);
+    }
 
-        for (int i = 0; i < 3; i++)
+    static void DrawSegment(ID2D1DeviceContext dc, ResourceCache res, float s, RectangleF box, string text,
+        bool active, Vortice.DirectWrite.IDWriteTextFormat fmt, ID2D1Brush ink)
+    {
+        var r = S(box, s);
+        float radius = 6f * s;
+        dc.FillRoundedRectangle(new RoundedRectangle(r, radius, radius),
+            res.Brush(active ? SystemTheme.Accent : SystemTheme.Pill));
+        dc.DrawText(text, fmt, new Rect(r.X, r.Y, r.Width, r.Height), ink);
+    }
+
+    /// <summary>
+    /// The four number sliders, the components the mode rows select: R/G/B/Alpha or
+    /// Hue/Saturation/Value/Alpha. Label left, groove filled to the value with a ring
+    /// handle, number right, exactly as the reference card lays them out.
+    /// </summary>
+    static void DrawSliders(ID2D1DeviceContext dc, ResourceCache res, float s)
+    {
+        var c = Shown();
+        double[] t = _model == PickerModel.Rgb
+            ? [c.R / 255.0, c.G / 255.0, c.B / 255.0, _alpha / 255.0]
+            : [_hsv.H / 360.0, _hsv.S, _hsv.V, _alpha / 255.0];
+        string[] labels = _model == PickerModel.Rgb
+            ? ["R:", "G:", "B:", "Alpha:"]
+            : ["Hue:", "Saturation:", "Value:", "Alpha:"];
+        var fmt = res.Format("Segoe UI Variable Text", 12f, Vortice.DirectWrite.FontWeight.Normal);
+        var white = res.Brush(new Color4(1f, 1f, 1f, 1f));
+
+        for (int i = 0; i < 4; i++)
         {
-            var row = S(Picker.Channel(i), s);
-            dc.FillRoundedRectangle(new RoundedRectangle(row, 8f * s, 8f * s), res.Brush(SystemTheme.Pill));
-            dc.DrawText(Picker.ChannelLabels[i], labelFmt, new Rect(row.X, row.Y, row.Width, row.Height),
+            var row = S(Picker.Slider(i), s);
+            dc.FillRoundedRectangle(new RoundedRectangle(row, 6f * s, 6f * s), res.Brush(SystemTheme.Pill));
+            dc.DrawText(labels[i], fmt, new Rect(row.X + 8f * s, row.Y, Picker.ChanLabelW * s, row.Height),
                 res.Brush(SystemTheme.MutedInk));
 
             var groove = S(Picker.Groove(i), s);
             float hr = groove.Height / 2f;
             dc.FillRoundedRectangle(new RoundedRectangle(groove, hr, hr), res.Brush(SystemTheme.Field));
-            float fill = Picker.XFromChannel(i, values[i]) * s + hr - groove.Left;
+            float fill = Picker.XFromSlider(i, t[i]) * s + hr - groove.Left;
             if (fill > 0.5f)
                 dc.FillRoundedRectangle(
                     new RoundedRectangle(new RectangleF(groove.Left, groove.Top, fill, groove.Height), hr, hr),
-                    res.Brush(tints[i]));
+                    res.Brush(i == 3 ? SystemTheme.MutedInk : Tint(i, c)));
 
-            float hx = Picker.XFromChannel(i, values[i]) * s;
+            float hx = Picker.XFromSlider(i, t[i]) * s;
             float d = 7f * s;
-            var white = res.Brush(new Color4(1f, 1f, 1f, 1f));
             Ring(dc, hx - d / 2f, groove.Top + groove.Height / 2f - d / 2f, d, white, 1.6f * s);
 
-            // The number sits right-aligned, FieldPad clear of the box edge.
-            float pad = 8f * s;
-            dc.DrawText(values[i].ToString(), valueFmt,
-                new Rect(row.Right - Picker.ChanValueW * s, row.Y, Picker.ChanValueW * s - pad, row.Height),
-                res.Brush(SystemTheme.Ink));
+            string text = _model == PickerModel.Rgb && i < 3
+                ? (i == 0 ? c.R.ToString() : i == 1 ? c.G.ToString() : c.B.ToString())
+                : t[i].ToString("0.000");
+            var slot = new Rect(row.Right - Picker.ChanValueW * s, row.Y, Picker.ChanValueW * s - 8f * s, row.Height);
+            slot.X = row.Right - _res.Measure(text, fmt, s).Width - 10f * s;   // right-aligned
+            dc.DrawText(text, fmt, slot, res.Brush(SystemTheme.Ink));
         }
     }
 
-    /// <summary>The hex field. Read-only, like the read-only fields we ship.</summary>
+    /// <summary>Each RGB groove carries its own channel so the rows read apart at a glance.</summary>
+    static Color4 Tint(int i, Rgba c) => i switch
+    {
+        0 => new(c.R / 255f, 0.42f, 0.42f, 1f),
+        1 => new(0.42f, c.G / 255f, 0.42f, 1f),
+        _ => new(0.42f, 0.42f, c.B / 255f, 1f),
+    };
+
+    /// <summary>The hex field with its own label, as the reference card has it. Read-only.</summary>
     static void DrawHex(ID2D1DeviceContext dc, ResourceCache res, float s)
     {
+        var label = S(Picker.HexLabel, s);
+        var fmt = res.Format("Segoe UI Variable Text", 12f, Vortice.DirectWrite.FontWeight.Normal);
+        dc.DrawText("Hex", fmt, new Rect(label.X, label.Y, label.Width, label.Height),
+            res.Brush(SystemTheme.MutedInk));
+
         var box = S(Picker.Hex, s);
         dc.FillRoundedRectangle(new RoundedRectangle(box, 6f * s, 6f * s), res.Brush(SystemTheme.Pill));
-        var fmt = res.Format("Segoe UI Variable Text", 12f, Vortice.DirectWrite.FontWeight.Normal);
-        float pad = 8f * s;
-        dc.DrawText(Current().ToHex(), fmt,
+        float pad = Picker.FieldPad * s;
+        dc.DrawText(Current().ToHexWithAlpha(), fmt,
             new Rect(box.X + pad, box.Y, box.Width - pad * 2f, box.Height),
             res.Brush(SystemTheme.Ink));
     }
@@ -565,15 +642,17 @@ internal static class ColorPickerWindow
     static void EnsureWheel(ID2D1DeviceContext dc)
     {
         int n = (int)MathF.Ceiling(Picker.WheelR * 2f * _scale);
-        if (_wheelBmp == null || _wheelPx != n)
+        int space = (int)_space;
+        if (_wheelBmp[space] == null || _wheelPx != n)
         {
-            _wheelBmp?.Dispose();
-            _wheelBmp = MakeWheel(dc, n);
+            if (_wheelPx != n)
+                for (int i = 0; i < _wheelBmp.Length; i++) { _wheelBmp[i]?.Dispose(); _wheelBmp[i] = null; }
+            _wheelBmp[space] = MakeWheel(dc, n, _space);
             _wheelPx = n;
         }
     }
 
-    static ID2D1Bitmap1? MakeWheel(ID2D1DeviceContext dc, int n)
+    static ID2D1Bitmap1? MakeWheel(ID2D1DeviceContext dc, int n, PickerSpace space)
     {
         float rMax = n / 2f;
         var buf = new byte[n * n * 4];
@@ -586,8 +665,10 @@ internal static class ColorPickerWindow
                 // Same mapping as ColorPickerLayout.HsFromPoint: hue 0 at 12 o'clock, clockwise.
                 double hue = Math.Atan2(dx, -dy) / (2.0 * Math.PI) * 360.0;
                 hue = (hue % 360.0 + 360.0) % 360.0;
-                var (cr, cg, cb) = new Hsv(hue, Math.Clamp(r / rMax, 0.0, 1.0), 1.0).ToRgb();
-                Put(buf, (y * n + x) * 4, cr, cg, cb);
+                var (hr, hg, hb) = new Hsv(hue, Math.Clamp(r / rMax, 0.0, 1.0), 1.0).ToRgb();
+                var c = new Rgba(hr, hg, hb);
+                if (space == PickerSpace.Linear) c = c.ToLinear();
+                Put(buf, (y * n + x) * 4, c.R, c.G, c.B);
             }
         return Upload(dc, n, n, buf);
     }
