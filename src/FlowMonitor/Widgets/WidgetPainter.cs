@@ -83,8 +83,7 @@ public static class WidgetPainter
         float half = size * BadgeInk;
         float t = Math.Max(1f, half * GlyphGeometry.BarRatio);
         var glyph = res.Brush(new Color4(1f, 1f, 1f, amount * (0.5f + 0.5f * hover)));
-        using var tick = GlyphGeometry.Build(res, sink => GlyphGeometry.Check(sink, center, half, t));
-        if (tick != null) dc.FillGeometry(tick, glyph);
+        FillAll(dc, GlyphGeometry.Build(res, () => GlyphGeometry.Check(center, half, t)), glyph);
 
         dc.Transform = Matrix3x2.Identity;
         dc.PopAxisAlignedClip();
@@ -114,73 +113,24 @@ public static class WidgetPainter
         float half = size * BadgeInk;
         float t = Math.Max(1f, half * GlyphGeometry.BarRatio);
         var glyph = res.Brush(new Color4(1f, 1f, 1f, amount * (0.5f + 0.5f * hover)));
-        using var cross = GlyphGeometry.Build(res, sink => GlyphGeometry.X(sink, center, half, t));
-        if (cross != null) dc.FillGeometry(cross, glyph);
+        FillAll(dc, GlyphGeometry.Build(res, () => GlyphGeometry.X(center, half, t)), glyph);
 
         dc.Transform = Matrix3x2.Identity;
         dc.PopAxisAlignedClip();
     }
 
-    /// <summary>Builds a closed filled geometry from a point list.</summary>
-    static ID2D1PathGeometry FilledGlyph(ResourceCache res, V2[] pts)
-    {
-        var geo = res.D2DFactory.CreatePathGeometry();
-        using (var sink = geo.Open())
-        {
-            sink.BeginFigure(pts[0], FigureBegin.Filled);
-            sink.AddLines(pts);
-            sink.EndFigure(FigureEnd.Closed);
-            sink.Close();
-        }
-        return geo;
-    }
-
     /// <summary>
-    /// A filled X as one polygon: a plus of arm half-length half*sqrt2 and half-thickness
-    /// t, rotated 45 degrees. Its ink half-extent is `half`, so HeaderLayout's reserve
-    /// still describes what is drawn.
+    /// Fills each part of a glyph as its own opaque geometry, so parts that overlap
+    /// (the X's arms, a tick's join) cannot cancel under D2D's even-odd fill rule.
     /// </summary>
-    static V2[] CrossPolygon(V2 c, float half, float t)
+    static void FillAll(ID2D1DeviceContext dc, ID2D1PathGeometry[] parts, ID2D1Brush brush)
     {
-        float a = (float)(half * Math.Sqrt(2.0));
-        var plus = new[]
+        foreach (var g in parts)
         {
-            new V2(0, -a), new V2(t, -a), new V2(t, -t), new V2(a, -t),
-            new V2(a, t), new V2(t, t), new V2(t, a), new V2(-t, a),
-            new V2(-t, t), new V2(-a, t), new V2(-a, -t), new V2(-t, -t),
-        };
-        var outPts = new V2[plus.Length];
-        for (int i = 0; i < plus.Length; i++)
-        {
-            // Rotate 45 degrees: the plus becomes the X.
-            double x = (plus[i].X + plus[i].Y) * 0.70710678118654752;
-            double y = (plus[i].Y - plus[i].X) * 0.70710678118654752;
-            outPts[i] = new V2(c.X + (float)x, c.Y + (float)y);
+            using (g) dc.FillGeometry(g, brush);
         }
-        return outPts;
     }
 
-    /// <summary>The check as one filled outline: both arms offset by the bar half-thickness.</summary>
-    static V2[] CheckPolygon(V2 p0, V2 p1, V2 p2, float t)
-    {
-        static V2 Norm(V2 a, V2 b, float half)
-        {
-            double dx = b.X - a.X, dy = b.Y - a.Y, len = Math.Sqrt(dx * dx + dy * dy);
-            if (len < 1e-6) return new V2(0, -half);
-            return new V2((float)(-dy / len * half), (float)(dx / len * half));
-        }
-        var n0 = Norm(p0, p1, t);      // left arm, outward side
-        var n1 = Norm(p1, p2, t);
-        return
-        [
-            new V2(p0.X + n0.X, p0.Y + n0.Y),
-            new V2(p1.X + n0.X, p1.Y + n0.Y),
-            new V2(p2.X + n1.X, p2.Y + n1.Y),
-            new V2(p2.X - n1.X, p2.Y - n1.Y),
-            new V2(p1.X - n1.X, p1.Y - n1.Y),
-            new V2(p0.X - n0.X, p0.Y - n0.Y),
-        ];
-    }
 
     /// <summary>
     /// Metric switcher chevrons flanking the title. Edit mode only; boxes come from

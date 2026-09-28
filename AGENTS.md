@@ -16,8 +16,9 @@
 14. Chart chrome and axis ticks follow `docs/design.md`; byte scales are `ChartRenderer.ByteAxisMax` (power of two, floor 4).
 15. Sampler state the render thread reads is copied out under a lock (`GpuSampler.EngineSnapshot`); never enumerate a list the sampling thread rebuilds.
 16. Persist geometry on move/resize, not only on apply: `FlushPendingGeometry` saves, so a drag survives a restart without the checkmark.
-17. Popups (colour picker) paint through `ColorPickerLayout` + `SystemTheme`; ring/disc are CPU bitmaps drawn 1:1 with `DrawBitmap` (a bitmap brush re-maps DPI and smears).
+17. Popups (colour picker) paint through `ColorPickerLayout` + `SystemTheme`.
 18. Layout asserts read MEASURED ink out of a captured frame; never re-derive the arithmetic under test, and never hand-fit a constant that a painter does not draw to (docs/design.md 12-15).
 19. One frame lays the row out once. Paint and hit-test must consume the same result, not two independent computations.
 20. Nothing is drawn flush to a container edge: every element inside a card, chip, segment, field or row is inset by the shared InnerPad on all four sides (docs/design.md 21-23). A number typed at a call site is a bug.
 21. The header is one row: every upper element takes its y from HeaderLayout.RowCenterFor and moves together. A control never colours itself with the value it edits (docs/design.md 21-22).
+22. NEVER RASTERISE AN ICON OR GLYPH. Icons are vector geometry built from primitives (`GlyphGeometry`) or from the upstream SVG path walked into an `ID2D1GeometrySink`; no pixel mask, no CPU-rasterised bitmap, no `DrawBitmap` for a glyph. A bitmap is the last resort, and a wheel is drawn by a D3D11 shader, not per-pixel in C#.

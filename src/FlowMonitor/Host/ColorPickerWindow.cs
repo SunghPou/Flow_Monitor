@@ -661,9 +661,12 @@ internal static class ColorPickerWindow
         // icon inside its button.
         float side = MathF.Min(box.Width, box.Height) * Widgets.GlyphGeometry.IconFill;
         var c = new V2(box.X + box.Width / 2f, box.Y + box.Height / 2f);
-        float half = side / 2f, t = MathF.Max(1f, half * Widgets.GlyphGeometry.BarRatio);
-        using var geo = Widgets.GlyphGeometry.Build(res, sink => Widgets.GlyphGeometry.Dropper(sink, c, half, t));
-        dc.FillGeometry(geo, res.Brush(SystemTheme.Ink));
+        var parts = Widgets.GlyphGeometry.Build(res, () => Widgets.GlyphGeometry.Dropper(c, side));
+        var ink = res.Brush(SystemTheme.Ink);
+        foreach (var g in parts)
+        {
+            using (g) dc.FillGeometry(g, ink);
+        }
     }
 
     static RectangleF S(RectangleF r, float s) => new(r.X * s, r.Y * s, r.Width * s, r.Height * s);
