@@ -474,10 +474,11 @@ internal static class ColorPickerWindow
         => dc.DrawEllipse(new Ellipse(new V2(x + d / 2f, y + d / 2f), d / 2f, d / 2f), brush, width);
 
     /// <summary>
-    /// Blender's value bar for the circle picker, ported from draw_but_HSV_v
-    /// (interface_widgets.cc): a NEUTRAL black-to-white ramp that never takes the hue
-    /// and never changes as the handle moves, a 1px outline, and a black handle bar
-    /// with a grey core of the current value that grows a pixel while it is held.
+    /// Blender's value bar for the circle picker (draw_but_HSV_v): a NEUTRAL white-to-black
+    /// ramp that never takes the hue and never repaints as the handle moves, a 1px
+    /// outline, and a black handle bar with a core of the current value that grows a
+    /// pixel while it is held. Full brightness at the top, black at the bottom, as the
+    /// reference card draws it.
     /// </summary>
     static void DrawValueBar(ID2D1DeviceContext dc, ResourceCache res, float s)
     {
@@ -487,8 +488,8 @@ internal static class ColorPickerWindow
             new V2(0f, track.Top), new V2(0f, track.Bottom));
         using var stops = dc.CreateGradientStopCollection(
         [
-            new GradientStop(0f, new Color4(0f, 0f, 0f, 1f)),
-            new GradientStop(1f, new Color4(1f, 1f, 1f, 1f)),
+            new GradientStop(0f, new Color4(1f, 1f, 1f, 1f)),
+            new GradientStop(1f, new Color4(0f, 0f, 0f, 1f)),
         ], Gamma.Linear, ExtendMode.Clamp);
         using var ramp = dc.CreateLinearGradientBrush(props, stops);
         dc.FillRoundedRectangle(new RoundedRectangle(track, r, r), ramp);

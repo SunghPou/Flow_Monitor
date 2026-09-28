@@ -150,15 +150,17 @@ public static class ColorPickerLayout
     }
 
     /// <summary>
-    /// Value under a point on the vertical bar. Blender's draw_but_HSV_v puts the
-    /// handle at `ymin + v * height`, so zero sits at the top and one at the bottom,
-    /// which is also where the ramp ends (black top, white bottom).
+    /// Value under a point on the vertical bar: full at the top, black at the bottom, the
+    /// way the reference card draws it (white ramp end up, and the handle for a white
+    /// colour sits at the top). Blender's own source is ambiguous here — it computes
+    /// `ymin + v * height` in a widget space whose y axis points up — so the reference
+    /// image is what this follows.
     /// </summary>
     public static double ValueFromY(float y)
-        => Math.Clamp((y - ValueTrack.Top) / ValueTrack.Height, 0.0, 1.0);
+        => Math.Clamp(1.0 - (y - ValueTrack.Top) / ValueTrack.Height, 0.0, 1.0);
 
     public static float YFromValue(double v)
-        => ValueTrack.Top + (float)Math.Clamp(v, 0.0, 1.0) * ValueTrack.Height;
+        => ValueTrack.Top + (float)(1.0 - Math.Clamp(v, 0.0, 1.0)) * ValueTrack.Height;
 
     /// <summary>Slider value under a point, normalised to 0..1 along the groove.</summary>
     public static double SliderFromX(int i, float x)

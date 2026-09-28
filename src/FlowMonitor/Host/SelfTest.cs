@@ -748,12 +748,12 @@ public static class SelfTest
                     "the vertical value bar and its handle are inverses",
                     $"value 0.62 -> y {vy:0.0} -> {ColorPickerLayout.ValueFromY(vy):0.000}");
 
-                // Blender's draw_but_HSV_v: y = ymin + v * height, so black and zero sit
-                // together at the top and full brightness at the bottom.
-                Check(Math.Abs(ColorPickerLayout.YFromValue(0) - ColorPickerLayout.ValueTrack.Top) < 0.01f
-                    && Math.Abs(ColorPickerLayout.YFromValue(1) - ColorPickerLayout.ValueTrack.Bottom) < 0.01f,
-                    "the value handle runs top to bottom like Blender's, not upside down",
-                    $"v=0 at y {ColorPickerLayout.YFromValue(0):0.0} (track top {ColorPickerLayout.ValueTrack.Top:0.0}), v=1 at y {ColorPickerLayout.YFromValue(1):0.0} (track bottom {ColorPickerLayout.ValueTrack.Bottom:0.0})");
+                // The reference card: white ramp end up, and the handle for a full-brightness
+                // colour sits at the top. Brightness increases upward, as on any slider.
+                Check(Math.Abs(ColorPickerLayout.YFromValue(1) - ColorPickerLayout.ValueTrack.Top) < 0.01f
+                    && Math.Abs(ColorPickerLayout.YFromValue(0) - ColorPickerLayout.ValueTrack.Bottom) < 0.01f,
+                    "the value handle runs bright at the top, like the reference card",
+                    $"v=1 at y {ColorPickerLayout.YFromValue(1):0.0} (track top {ColorPickerLayout.ValueTrack.Top:0.0}), v=0 at y {ColorPickerLayout.YFromValue(0):0.0} (track bottom {ColorPickerLayout.ValueTrack.Bottom:0.0})");
 
                 Check(ColorPickerLayout.ValueTrack.Left >= ColorPickerLayout.Center.X + ColorPickerLayout.WheelR                    && ColorPickerLayout.ValueTrack.Width < 40f,
                     "the value bar stands beside the wheel, not under it",
