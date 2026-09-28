@@ -16,19 +16,16 @@ public static class WidgetPainter
     static readonly Color4 BorderHover = new(1f, 1f, 1f, 0.17f);
     static readonly Color4 ArrowInk = new(1f, 1f, 1f, 0.60f);
 
-    /// <summary>Badge glyph half-extent as a fraction of its box, at full ease.</summary>
-    public const float BadgeInk = 0.32f;
-    /// <summary>How far a badge glyph reaches from its centre, as a fraction of the box.</summary>
-    public const float BadgeArm = 0.46f;
-    /// <summary>Badge stroke width as a fraction of the box.</summary>
-    public const float BadgeStroke = 0.115f;
     /// <summary>
-    /// Drawn half-width of a badge glyph in logical px at full ease, stroke included.
-    /// HeaderLayout reserves exactly this, so a badge is anchored on its real ink.
+    /// Badge glyph ink half-extent as a fraction of its box, at full ease: the glyph
+    /// spans 0.62 of the box across, the proportion a system close/tick icon uses.
     /// </summary>
-    public static readonly float BadgeGlyphHalf =
-        WidgetWindow.CheckMarkSize * BadgeInk * BadgeArm
-        + Math.Max(2f, WidgetWindow.CheckMarkSize * BadgeStroke) / 2f;
+    public const float BadgeInk = 0.31f;
+    /// <summary>
+    /// Drawn half-extent of a badge glyph in logical px at full ease. HeaderLayout
+    /// reserves exactly this, so a badge is anchored on its real ink (docs/design.md 15).
+    /// </summary>
+    public static readonly float BadgeGlyphHalf = WidgetWindow.CheckMarkSize * BadgeInk;
     /// <summary>Centre-to-tip distance of a metric chevron, in logical px at full ease.</summary>
     public const float ChevronTip = 6f;
     /// <summary>Stroke width of a metric chevron, in logical px.</summary>
@@ -81,18 +78,13 @@ public static class WidgetPainter
         dc.PushAxisAlignedClip(new RectF(0, 0, width, height), AntialiasMode.Aliased);
         dc.Transform = Matrix3x2.CreateScale(sc, sc, center);
 
-        // ✓ glyph: one filled outline, not two strokes. Two round-capped lines showed
-        // their construction (a brighter square where they crossed); a single opaque
-        // polygon has one uniform ink.
-        float r = size * BadgeInk;
-        float t = Math.Max(1f, size * BadgeStroke) / 2f;      // half bar thickness
-        var p0 = new V2(center.X - r * 0.44f, center.Y + r * 0.02f);
-        var p1 = new V2(center.X - r * 0.11f, center.Y + r * 0.35f);
-        var p2 = new V2(center.X + r * BadgeArm, center.Y - r * 0.36f);
-
+        // One filled outline at the standard weight, so the tick carries the same bar
+        // width as the X instead of reading thin next to it.
+        float half = size * BadgeInk;
+        float t = Math.Max(1f, half * GlyphGeometry.BarRatio);
         var glyph = res.Brush(new Color4(1f, 1f, 1f, amount * (0.5f + 0.5f * hover)));
-        using var tick = FilledGlyph(res, CheckPolygon(p0, p1, p2, t));
-        dc.FillGeometry(tick, glyph);
+        using var tick = GlyphGeometry.Build(res, sink => GlyphGeometry.Check(sink, center, half, t));
+        if (tick != null) dc.FillGeometry(tick, glyph);
 
         dc.Transform = Matrix3x2.Identity;
         dc.PopAxisAlignedClip();
@@ -117,14 +109,13 @@ public static class WidgetPainter
         dc.PushAxisAlignedClip(new RectF(0, 0, width, height), AntialiasMode.Aliased);
         dc.Transform = Matrix3x2.CreateScale(sc, sc, center);
 
-        // ✕ glyph: one filled outline. Two crossing strokes showed their construction;
-        // a single opaque polygon is a real icon.
-        float r = size * BadgeInk;
-        float t = Math.Max(1f, size * BadgeStroke) / 2f;
-        float half = r * BadgeArm + t;                       // same ink half-extent as before
+        // One filled outline at the standard weight: two crossing strokes double-composite
+        // where they meet, and a short fat one reads as a blob.
+        float half = size * BadgeInk;
+        float t = Math.Max(1f, half * GlyphGeometry.BarRatio);
         var glyph = res.Brush(new Color4(1f, 1f, 1f, amount * (0.5f + 0.5f * hover)));
-        using var cross = FilledGlyph(res, CrossPolygon(center, half, t));
-        dc.FillGeometry(cross, glyph);
+        using var cross = GlyphGeometry.Build(res, sink => GlyphGeometry.X(sink, center, half, t));
+        if (cross != null) dc.FillGeometry(cross, glyph);
 
         dc.Transform = Matrix3x2.Identity;
         dc.PopAxisAlignedClip();

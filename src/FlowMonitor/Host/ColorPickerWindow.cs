@@ -657,17 +657,13 @@ internal static class ColorPickerWindow
         var box = S(Picker.Eyedropper, s);
         dc.FillRoundedRectangle(new RoundedRectangle(box, 6f * s, 6f * s), res.Brush(SystemTheme.Pill));
 
-        // Centred, not flush: the 4px is the art's own margin, and a centred glyph needs
-        // no text pad or it would shrink below the size the reference card shows.
-        float d = MathF.Min(box.Width, box.Height) - 4f * s;
-        float side = d * Interop.BlenderDropper.Size / 30f;   // the art's own 1px margin
-        float cell = side / Interop.BlenderDropper.Size;       // device px per mask pixel
-        float ox = box.X + (box.Width - side) / 2f, oy = box.Y + (box.Height - side) / 2f;
-        var brush = res.Brush(SystemTheme.Ink);
-        for (int y = 0; y < Interop.BlenderDropper.Size; y++)
-            for (int x = 0; x < Interop.BlenderDropper.Size; x++)
-                if (Interop.BlenderDropper.Lit(x, y))
-                    dc.FillRectangle(new RectangleF(ox + x * cell, oy + y * cell, cell + 0.5f, cell + 0.5f), brush);
+        // The same filled-outline treatment as the header glyphs, sized as a standard
+        // icon inside its button.
+        float side = MathF.Min(box.Width, box.Height) * Widgets.GlyphGeometry.IconFill;
+        var c = new V2(box.X + box.Width / 2f, box.Y + box.Height / 2f);
+        float half = side / 2f, t = MathF.Max(1f, half * Widgets.GlyphGeometry.BarRatio);
+        using var geo = Widgets.GlyphGeometry.Build(res, sink => Widgets.GlyphGeometry.Dropper(sink, c, half, t));
+        dc.FillGeometry(geo, res.Brush(SystemTheme.Ink));
     }
 
     static RectangleF S(RectangleF r, float s) => new(r.X * s, r.Y * s, r.Width * s, r.Height * s);

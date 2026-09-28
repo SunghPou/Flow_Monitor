@@ -81,7 +81,8 @@ public static class ColorPickerLayout
     public const float ChanValueW = 42f;
     public const float ChanGroove = 5f;
     public const float HexLabelW = 34f;
-    public const float DropW = 32f;
+    /// <summary>Blender's eyedropper button is square, the height of the hex field.</summary>
+    public const float DropW = RowH;
     /// <summary>
     /// Inset for anything drawn inside a container: a segment's label, a slider's label
     /// and number, a text field's value. Nothing sits flush to a container edge
