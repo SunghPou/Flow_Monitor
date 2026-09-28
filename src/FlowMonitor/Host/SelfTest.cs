@@ -119,6 +119,35 @@ public static class SelfTest
                     bool botRed = Probe(cc.X, cc.Y + ro, (r, g, b) => r > 150 && g < 120 && b < 120);
                     Check(topCyan && botRed, "rendered wheel puts cyan at the top and red at the bottom",
                         $"top ({cc.X:0},{cc.Y - ro:0}) cyan={topCyan}, bottom ({cc.X:0},{cc.Y + ro:0}) red={botRed}");
+
+                    // The value bar is an sRGB white-to-black ramp: its middle reads as
+                    // mid-grey, not the ~0.73 a linear-light ramp renders. Handle sits at
+                    // the top for V=1, so the middle probe sees the plain ramp.
+                    for (int f = 0; f < 2; f++)
+                        ColorPickerWindow.PaintTo(pick, resources, 1f,
+                            new Hsv(275, 0.62, 1.0), new TestRenderHost(device, resources));
+                    var barPx = pick.CaptureToPixels(device);
+                    var vt = ColorPickerLayout.ValueTrack;
+                    int barMid = ((int)(vt.Top + vt.Height / 2f) * pw + (int)(vt.Left + vt.Width / 2f)) * 4;
+                    int midR = barPx[barMid + 2], midG = barPx[barMid + 1], midB = barPx[barMid];
+                    int barLow = ((int)(vt.Bottom - 4f) * pw + (int)(vt.Left + vt.Width / 2f)) * 4;
+                    int lowR = barPx[barLow + 2], lowG = barPx[barLow + 1], lowB = barPx[barLow];
+                    Check(midR is > 85 and < 170 && Math.Abs(midR - midG) < 20 && Math.Abs(midR - midB) < 20
+                            && lowR < 45 && lowG < 45 && lowB < 45,
+                        "the value bar is a neutral sRGB ramp, mid-grey in the middle, black at the bottom",
+                        $"mid=({midR},{midG},{midB}) low=({lowR},{lowG},{lowB})");
+
+                    // Blender's circle picker keeps the disc at full brightness: moving V
+                    // must not dim the wheel, only the value bar handle and final colour.
+                    for (int f = 0; f < 2; f++)
+                        ColorPickerWindow.PaintTo(pick, resources, 1f,
+                            new Hsv(275, 0.62, 0.2), new TestRenderHost(device, resources));
+                    var dimPx = pick.CaptureToPixels(device);
+                    int wi = ((int)(cc.Y - ro) * pw + (int)cc.X) * 4;
+                    int bright = Math.Abs(wheelPx[wi + 2] - dimPx[wi + 2])
+                        + Math.Abs(wheelPx[wi + 1] - dimPx[wi + 1]) + Math.Abs(wheelPx[wi] - dimPx[wi]);
+                    Check(bright < 24, "the wheel keeps full brightness when the value drops",
+                        $"top probe V=0.86 vs V=0.2 drift={bright}");
                 }
                 catch (Exception ex) { Log.Write("ERROR", "picker sheet: " + ex); }
                 finally

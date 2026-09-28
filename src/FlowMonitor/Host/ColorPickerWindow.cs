@@ -568,7 +568,6 @@ internal static class ColorPickerWindow
         if (wheel != null)
             dc.DrawBitmap(wheel, (RectangleF?)Square(Picker.Center, Picker.WheelR, s), 1f,
                 BitmapInterpolationMode.Linear, (RectangleF?)null);
-        DrawValueVeil(dc, res, s);
 
         DrawWheelMarker(dc, res, s);
         DrawValueBar(dc, res, s);
@@ -599,7 +598,9 @@ internal static class ColorPickerWindow
     /// ramp that never takes the hue and never repaints as the handle moves, a 1px
     /// outline, and a black handle bar with a core of the current value that grows a
     /// pixel while it is held. Full brightness at the top, black at the bottom, as the
-    /// reference card draws it.
+    /// reference card draws it. The stops interpolate in sRGB, so the middle reads as
+    /// mid-grey; a linear-light ramp renders the middle ~0.73 and the bar looks
+    /// washed out next to the reference.
     /// </summary>
     static void DrawValueBar(ID2D1DeviceContext dc, ResourceCache res, float s)
     {
@@ -610,7 +611,7 @@ internal static class ColorPickerWindow
         [
             new GradientStop(0f, new Color4(1f, 1f, 1f, 1f)),
             new GradientStop(1f, new Color4(0f, 0f, 0f, 1f)),
-        ], Gamma.Linear, ExtendMode.Clamp);
+        ], Gamma.StandardRgb, ExtendMode.Clamp);
         using var ramp = dc.CreateLinearGradientBrush(props, stops);
         // Square corners: the reference bar is a plain box, not a pill.
         dc.FillRectangle(track, ramp);
@@ -758,8 +759,8 @@ internal static class ColorPickerWindow
 
     // The wheel is generated at device pixels and drawn 1:1 with DrawBitmap: a bitmap
     // brush re-maps the source through DPI and produced smeared bands here. The wheel
-    // is baked at full value and dimmed with an overlay, so dragging the value slider
-    // never rebuilds it (rebuilding per value step was the stutter).
+    // is baked at full value and stays there: Blender's circle picker keeps the disc
+    // at full brightness and only the value bar and the final colour move with V.
     static void EnsureWheel(ID2D1DeviceContext dc)
     {
         int n = (int)MathF.Ceiling(Picker.WheelR * 2f * _scale);
@@ -809,16 +810,6 @@ internal static class ColorPickerWindow
                 Put(buf, (y * n + x) * 4, c.R, c.G, c.B, (byte)(hits * 255 / 16));
             }
         return Upload(dc, n, n, buf);
-    }
-
-    /// <summary>Black veil over the rim: value is the wheel's brightness.</summary>
-    static void DrawValueVeil(ID2D1DeviceContext dc, ResourceCache res, float s)
-    {
-        float dim = 1f - (float)Math.Clamp(_hsv.V, 0.0, 1.0);
-        if (dim <= 0.002f) return;
-        dc.FillEllipse(new Ellipse(new V2(Picker.Center.X * s, Picker.Center.Y * s),
-            Picker.WheelR * s, Picker.WheelR * s),
-            res.Brush(new Color4(0f, 0f, 0f, dim)));
     }
 
     static void Put(byte[] buf, int at, byte r, byte g, byte b, byte a)
