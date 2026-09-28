@@ -17,28 +17,38 @@ public static class HueWheelTexture
     const string Common = @"
 struct VSOut { float4 pos : SV_Position; float2 uv : TEXCOORD0; };
 
-static const float2 Verts[6] = {
-    float2(-1, -1), float2(1, -1), float2(1, 1),
-    float2(-1, -1), float2(1, 1), float2(-1, 1) };
+// HLSL will not index a constant array with a runtime value, so the two triangles
+// are chosen with arithmetic from the vertex id: a shared corner plus its two
+// neighbours, mirrored for the second triangle.
+float2 Corner(uint id)
+{
+    float2 p = id < 3u ? float2(-1, -1) : float2(1, 1);
+    uint i = id % 3u;
+    if (i == 0u) return p;
+    if (i == 1u) return float2(-p.x, p.y);
+    return float2(-p.y, -p.x);
+}
 
 VSOut VSMain(uint id : SV_VertexID)
 {
     VSOut o;
-    o.pos = float4(Verts[id], 0, 1);
-    o.uv = Verts[id] * 0.5 + 0.5;
+    float2 c = Corner(id);
+    o.pos = float4(c, 0, 1);
+    o.uv = c * 0.5 + 0.5;
     return o;
 }
 
 float3 Hsv2Rgb(float h, float s, float v)
 {
     float3 k = float3(1.0, 2.0 / 3.0, 1.0 / 3.0);
-    float3 p = abs(frac(float3(h) + k) * 6.0 - 3.0);
-    return v * mix(float3(1.0), clamp(p - 1.0, 0.0, 1.0), s);
+    float3 p = abs(frac(float3(h, h, h) + k) * 6.0 - 3.0);
+    return v * lerp(float3(1.0, 1.0, 1.0), clamp(p - 1.0, 0.0, 1.0), s);
 }
 
 float3 ToLinear(float3 c)
 {
-    return select(c / 12.92, pow((c + 0.055) / 1.055, 2.4), c > 0.04045);
+    // HLSL has no `select`; step gives the per-channel branch as a 0/1 weight.
+    return lerp(pow((c + 0.055) / 1.055, 2.4), c / 12.92, step(c, 0.04045));
 }
 
 float4 PSMain(VSOut i) : SV_Target
@@ -57,6 +67,8 @@ float4 PSMain(VSOut i) : SV_Target
     return float4(rgb * a, a);
 }
 ";
+    /// <summary>True when the last successful Build came from the shader, not the fallback.</summary>
+    public static bool LastUsedShader { get; private set; }
 
     /// <summary>
     /// Renders an n-by-n wheel. Returns null when the shader will not build, so the
@@ -64,6 +76,9 @@ float4 PSMain(VSOut i) : SV_Target
     /// </summary>
     public static ID2D1Bitmap1? Build(RenderDevice dev, ID2D1DeviceContext dc, int n, bool linear)
     {
+        LastUsedShader = false;
+        var d3d = dev.D3DDevice;
+        var ctx = dev.D3DContext;
         string source = (linear ? "#define LINEAR_SPACE 1\n" : "") + Common;
         byte[]? vsCode = Compile(source, "VSMain", "vs_4_0");
         byte[]? psCode = Compile(source, "PSMain", "ps_4_0");
@@ -77,26 +92,77 @@ float4 PSMain(VSOut i) : SV_Target
                 Height = (uint)n,
                 MipLevels = 1,
                 ArraySize = 1,
-                Format = Format.R8G8B8A8_UNorm,
+                Format = Format.B8G8R8A8_UNorm,
                 SampleDescription = new SampleDescription(1, 0),
                 Usage = ResourceUsage.Default,
                 BindFlags = BindFlags.RenderTarget | BindFlags.ShaderResource,
             };
-            using var tex = dev.D3DDevice.CreateTexture2D(desc);
-            using var vs = dev.D3DDevice.CreateVertexShader(vsCode, null);
-            using var ps = dev.D3DDevice.CreatePixelShader(psCode, null);
-            using var rtv = tex.QueryInterface<ID3D11RenderTargetView>();
-            if (rtv is null) return null;
+            using var tex = d3d.CreateTexture2D(desc);
+            using var vs = d3d.CreateVertexShader(vsCode, null);
+            using var ps = d3d.CreatePixelShader(psCode, null);
+            using var rtv = d3d.CreateRenderTargetView(tex, null);
+            if (rtv is null) { Log.Warn("hue wheel: no render target view"); return null; }
+            // The default rasteriser culls back faces, and both full-screen triangles
+            // are counter-clockwise, so the default state discards the whole draw.
+            using var rs = d3d.CreateRasterizerState(new RasterizerDescription
+            {
+                FillMode = Vortice.Direct3D11.FillMode.Solid,
+                CullMode = CullMode.None,
+            });
 
-            dev.D3DContext.OMSetRenderTargets(1, [rtv], null);
-            dev.D3DContext.IASetPrimitiveTopology(Vortice.Direct3D.PrimitiveTopology.TriangleList);
-            dev.D3DContext.VSSetShader(vs);
-            dev.D3DContext.PSSetShader(ps);
-            dev.D3DContext.Draw(6, 0);
-
-            using var surface = tex.QueryInterface<IDXGISurface>();
-            if (surface is null) return null;
-            return dc.CreateBitmapFromDxgiSurface(surface, null);
+            ctx.OMSetRenderTargets(1, [rtv], null);
+            ctx.RSSetViewports([new Vortice.Mathematics.Viewport(0f, 0f, n, n, 0f, 1f)]);
+            // D2D leaves its own rasteriser, blend and depth state behind; the default
+            // state is what a full-screen triangle needs, and culling it is what made
+            // the wheel render black.
+            ctx.RSSetState(rs);
+            ctx.OMSetBlendState(null);
+            ctx.OMSetDepthStencilState(null, 0);
+            ctx.ClearRenderTargetView(rtv, new Vortice.Mathematics.Color4(0f, 0f, 0f, 0f));
+            ctx.IASetPrimitiveTopology(Vortice.Direct3D.PrimitiveTopology.TriangleList);
+            ctx.IASetInputLayout(null);
+            ctx.VSSetShader(vs);
+            ctx.PSSetShader(ps);
+            ctx.Draw(6, 0);
+            // The DXGI surface is wrapped by another device immediately, so the draw has
+            // to have left the context before CreateBitmapFromDxgiSurface reads it.
+            // D2D's device context owns the shared immediate context and overwrites the
+            // pipeline state behind our back, so the drawn surface cannot be handed to it
+            // directly. The wheel is still drawn by the GPU; only the hand-off is a
+            // staged readback, which happens once per (size, working space).
+            using var staging = d3d.CreateTexture2D(new Texture2DDescription
+            {
+                Width = (uint)n,
+                Height = (uint)n,
+                MipLevels = 1,
+                ArraySize = 1,
+                Format = Format.B8G8R8A8_UNorm,
+                SampleDescription = new SampleDescription(1, 0),
+                Usage = ResourceUsage.Staging,
+                BindFlags = BindFlags.None,
+                CPUAccessFlags = CpuAccessFlags.Read,
+            });
+            ctx.CopyResource(staging, tex);
+            ctx.Flush();
+            ctx.VSSetShader(null);
+            ctx.PSSetShader(null);
+            ctx.RSSetState(null);
+            var box = ctx.Map(staging, 0, MapMode.Read, Vortice.Direct3D11.MapFlags.None);
+            try
+            {
+                ID2D1Bitmap1? bmp = dc.CreateBitmap(
+                    new Vortice.Mathematics.SizeI(n, n), box.DataPointer, (uint)box.RowPitch,
+                    new Vortice.Direct2D1.BitmapProperties1
+                    {
+                        PixelFormat = new Vortice.DCommon.PixelFormat(Format.B8G8R8A8_UNorm,
+                            Vortice.DCommon.AlphaMode.Premultiplied),
+                        DpiX = 96,
+                        DpiY = 96,
+                    });
+                LastUsedShader = bmp is not null;
+                return bmp;
+            }
+            finally { ctx.Unmap(staging, 0); }
         }
         catch (Exception ex)
         {

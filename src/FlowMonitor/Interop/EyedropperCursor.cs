@@ -72,8 +72,8 @@ public static class EyedropperCursor
     static extern bool DeleteDC(IntPtr hdc);
 
     [DllImport("user32.dll", SetLastError = true)]
-    static extern IntPtr CreateCursorW(IntPtr instance, IntPtr andPlane, IntPtr xorPlane,
-        int hotX, int hotY);
+    static extern IntPtr CreateCursor(IntPtr instance, int hotX, int hotY,
+        int width, int height, IntPtr andPlane, IntPtr xorPlane);
 
     static IntPtr Build()
     {
@@ -97,11 +97,13 @@ public static class EyedropperCursor
         {
             bmp = CreateDIBSection(dc, ref info, DIB_RGB_COLORS, out bits, IntPtr.Zero, 0);
             if (bmp == IntPtr.Zero || bits == IntPtr.Zero) return IntPtr.Zero;
-            var old = SelectObject(dc, bmp);
-            try { Fill(bits); }
-            finally { SelectObject(dc, old); }
-
-            cursor = CreateCursorW(Native.GetModuleHandle(null), bmp, bmp, HotX, HotY);
+            Fill(bits);
+            // The DIB holds the XOR plane first and the AND plane below it; the cursor
+            // copies both bit planes, so the section is deleted right after.
+            int stride = (Size + 31) / 32 * 4;
+            IntPtr xorBits = bits, andBits = IntPtr.Add(bits, Size * stride);
+            cursor = CreateCursor(Native.GetModuleHandle(null), HotX, HotY,
+                Size, Size, andBits, xorBits);
             if (cursor == IntPtr.Zero) return IntPtr.Zero;
         }
         catch (Exception ex)
@@ -127,11 +129,12 @@ public static class EyedropperCursor
         int stride = (Size + 31) / 32 * 4;
         for (int y = 0; y < Size; y++)
         {
-            uint xorWord = 0, andWord = 0;
+            // Transparent everywhere (AND keeps the screen, XOR draws nothing);
+            // ink pixels become white (AND clears, XOR sets).
+            uint xorWord = 0, andWord = 0xFFFFFFFFu;
             for (int x = 0; x < Size; x++)
             {
-                bool on = ShapeAt(x, y);
-                if (!on) continue;
+                if (!ShapeAt(x, y)) continue;
                 xorWord |= 1u << (31 - (x & 31));
                 andWord &= ~(1u << (31 - (x & 31)));
             }

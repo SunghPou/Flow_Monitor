@@ -472,7 +472,9 @@ internal static class Native
     // ------------------------------------------------------------------ menu window extras
     public const uint WS_EX_TOPMOST = 0x00000008;
     public const int WM_CANCELMODE = 0x001F;
+    public const int WM_CAPTURECHANGED = 0x0215;
     public const int VK_ESCAPE = 0x1B;
+    public const int VK_LBUTTON = 0x01;
 
     /// <summary>Polls a key without focus; the high bit is set while it is down.</summary>
     [System.Runtime.InteropServices.DllImport("user32.dll")]

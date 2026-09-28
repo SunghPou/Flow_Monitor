@@ -48,7 +48,8 @@ internal static class ColorPickerWindow
     static bool _picking;
     static bool _done;                 // the pick loop's exit flag
     const IntPtr PickTimerId = 2;
-    const uint PickTimerMs = 16;
+    const uint PickTimerMs = 10;
+    static bool _wasDown;
 
     /// <summary>Wheel notch size for the value component (Blender's colorpicker_wheel_cb).</summary>
     const double WheelStep = 0.05;
@@ -88,7 +89,6 @@ internal static class ColorPickerWindow
                     return new IntPtr(0);
 
                 case Native.WM_TIMER:
-                    Log.Info($"picker: timer wParam={wParam.ToInt64()}");
                     if (wParam == 1) OnFrame();
                     else if (wParam == PickTimerId) OnPickTimer();
                     return new IntPtr(0);
@@ -118,6 +118,12 @@ internal static class ColorPickerWindow
 
                 case Native.WM_CANCELMODE:
                     Close();
+                    return new IntPtr(0);
+
+                case Native.WM_CAPTURECHANGED:
+                    // Another window took the capture: the pick is over, without
+                    // re-capturing, which would fight the new owner.
+                    if (_picking) _done = true;
                     return new IntPtr(0);
 
                 case Native.WM_ACTIVATE:
@@ -194,7 +200,6 @@ internal static class ColorPickerWindow
         // write and a repaint request, and deferring it makes the graph lag behind (or
         // ignore) the card when the timer never lands.
         string hex = Current().ToHexWithAlpha();
-        Log.Info("picker: push " + hex + " sink=" + (_onChanged is null ? "null" : "set"));
         _onChanged?.Invoke(hex);
         if (_timerOn || _hwnd == IntPtr.Zero) return;
         _timerOn = true;
@@ -426,19 +431,21 @@ internal static class ColorPickerWindow
     /// once the card no longer holds focus.
     /// </summary>
     /// <summary>
-    /// Desktop pick. The card stays up - hiding it tore down the composition target and
-    /// the picker's WM_ACTIVATE handler closed the popup, so the card vanished on click.
-    /// A click anywhere on the desktop is caught by the system-wide hook and applied.
+    /// Desktop pick. The card stays up: hiding it tore down the composition target and
+    /// the WM_ACTIVATE handler closed the popup. Capture plus a fast timer owns the
+    /// cursor: SetCursor lasts only until the next window sets its own, so the timer
+    /// re-asserts the pipette while the button state is polled for the terminating click.
     /// </summary>
     static void PickScreen()
     {
         _picking = true;
-        Interop.GlobalMouseHook.Clicked += OnPicked;
-        Interop.GlobalMouseHook.Install();
+        _wasDown = (Native.GetAsyncKeyState(Native.VK_LBUTTON) & 0x8000) != 0;
+        Native.SetCapture(_hwnd);
+        Interop.EyedropperCursor.Apply(true);
+        if (Native.SetTimer(_hwnd, PickTimerId, PickTimerMs, IntPtr.Zero) == IntPtr.Zero)
+            Log.Warn("eyedropper: SetTimer failed " + Marshal.GetLastWin32Error());
         try
         {
-            Interop.EyedropperCursor.Apply(true);
-            Native.SetTimer(_hwnd, PickTimerId, PickTimerMs, IntPtr.Zero);
             while (!_done && _hwnd != IntPtr.Zero)
             {
                 int r = Native.GetMessageW(out var msg, IntPtr.Zero, 0, 0);
@@ -453,8 +460,7 @@ internal static class ColorPickerWindow
         finally
         {
             Native.KillTimer(_hwnd, PickTimerId);
-            Interop.GlobalMouseHook.Clicked -= OnPicked;
-            Interop.GlobalMouseHook.Remove();
+            Native.ReleaseCapture();
             _picking = false;
             _done = false;
             Interop.EyedropperCursor.Apply(false);
@@ -476,11 +482,22 @@ internal static class ColorPickerWindow
         _done = true;
     }
 
-    /// <summary>Pushes the pipette cursor back and watches for Esc while the desktop is ours.</summary>
+    /// <summary>
+    /// The 10ms pick tick: the pipette is re-asserted (SetCursor lasts only until the
+    /// next window sets its own), Esc cancels, and the terminating click never reaches
+    /// our window, so its rising edge is polled and sampled at the cursor position.
+    /// </summary>
     static void OnPickTimer()
     {
         Interop.EyedropperCursor.Apply(true);
-        if ((Native.GetAsyncKeyState(Native.VK_ESCAPE) & 0x8000) != 0) { _cancelled = true; _done = true; }
+        if ((Native.GetAsyncKeyState(Native.VK_ESCAPE) & 0x8000) != 0) { _cancelled = true; _done = true; return; }
+        bool down = (Native.GetAsyncKeyState(Native.VK_LBUTTON) & 0x8000) != 0;
+        if (down && !_wasDown)
+        {
+            Native.GetCursorPos(out var at);
+            OnPicked(at.X, at.Y);
+        }
+        _wasDown = down;
     }
 
     // ------------------------------------------------------------------ paint
@@ -728,12 +745,14 @@ internal static class ColorPickerWindow
         {
             if (_wheelPx != n)
                 for (int i = 0; i < _wheelBmp.Length; i++) { _wheelBmp[i]?.Dispose(); _wheelBmp[i] = null; }
-            // The shader draws the wheel with a smoothstepped rim; the CPU loop is only
-            // the fallback for a machine where the shader will not build.
+            // The shader draws the wheel; the CPU loop is the fallback for a machine
+            // where the shader will not build.
             _wheelBmp[space] = _host is null
                 ? MakeWheel(dc, n, _space)
-                : Rendering.HueWheelTexture.Build(_host.Device, dc, n, _space == PickerSpace.Linear)
-                  ?? MakeWheel(dc, n, _space);
+                : FlowMonitor.Rendering.HueWheelTexture.Build(_host.Device, dc, n, _space == PickerSpace.Linear)
+                    ?? MakeWheel(dc, n, _space);
+            Log.Info("picker: wheel drawn by "
+                + (FlowMonitor.Rendering.HueWheelTexture.LastUsedShader ? "shader" : "cpu"));
             _wheelPx = n;
         }
     }
@@ -747,14 +766,24 @@ internal static class ColorPickerWindow
             {
                 float dx = x + 0.5f - rMax, dy = y + 0.5f - rMax;
                 float r = MathF.Sqrt(dx * dx + dy * dy);
-                if (r > rMax) continue;                       // clear outside the rim
-                // Same mapping as ColorPickerLayout.HsFromPoint: hue 0 at 12 o'clock, clockwise.
-                double hue = Math.Atan2(dx, -dy) / (2.0 * Math.PI) * 360.0;
+                // Coverage of the rim, sampled on a 4x4 grid inside the pixel, so the
+                // edge fades out instead of stepping from inside to clear.
+                int hits = 0;
+                for (int sy = 0; sy < 4; sy++)
+                    for (int sx = 0; sx < 4; sx++)
+                    {
+                        float px = x + (sx + 0.5f) / 4f - rMax;
+                        float py = y + (sy + 0.5f) / 4f - rMax;
+                        if (MathF.Sqrt(px * px + py * py) <= rMax) hits++;
+                    }
+                if (hits == 0) continue;
+                // Same mapping as ColorPickerLayout.HsFromPoint: red at the bottom, clockwise.
+                double hue = Math.Atan2(dx, -dy) / (2.0 * Math.PI) * 360.0 + 180.0;
                 hue = (hue % 360.0 + 360.0) % 360.0;
                 var (hr, hg, hb) = new Hsv(hue, Math.Clamp(r / rMax, 0.0, 1.0), 1.0).ToRgb();
                 var c = new Rgba(hr, hg, hb);
                 if (space == PickerSpace.Linear) c = c.ToLinear();
-                Put(buf, (y * n + x) * 4, c.R, c.G, c.B);
+                Put(buf, (y * n + x) * 4, c.R, c.G, c.B, (byte)(hits * 255 / 16));
             }
         return Upload(dc, n, n, buf);
     }
@@ -769,10 +798,11 @@ internal static class ColorPickerWindow
             res.Brush(new Color4(0f, 0f, 0f, dim)));
     }
 
-    static void Put(byte[] buf, int at, byte r, byte g, byte b)
+    static void Put(byte[] buf, int at, byte r, byte g, byte b, byte a)
     {
-        // B8G8R8A8_UNorm, premultiplied; the wheel is opaque wherever it is not clear.
-        buf[at] = b; buf[at + 1] = g; buf[at + 2] = r; buf[at + 3] = 255;
+        // B8G8R8A8_UNorm, premultiplied; a is the rim coverage.
+        float f = a / 255f;
+        buf[at] = (byte)(b * f); buf[at + 1] = (byte)(g * f); buf[at + 2] = (byte)(r * f); buf[at + 3] = a;
     }
 
     // The 3-argument CreateBitmap carries no pixel format and fails with
