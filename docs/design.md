@@ -49,6 +49,43 @@ to a box would leave the glyph visibly short of the line it is meant to sit on.
    every centre, anchor and gap is fixed for the whole fade, and a glyph grows
    about its own centre.
 
+### Why the header was wrong repeatedly, and what changed
+
+The layout was computed in **two** places per frame — `ChartRenderer.Draw` for the
+text and `WidgetWindow.RenderFrameCore` for the hit boxes — each measuring its own
+text width, while the ink extents lived in a third place, a hand-fitted formula
+(`WidgetPainter.BadgeGlyphHalf = size*Ink*Arm + stroke/2`) that the painters
+themselves did not draw to. So the layout reserved ink the painters never painted
+and painted ink the layout never reserved, and each of the three could drift.
+`FitValue` made it worse: the layout reserved the *full* value width and the
+painter drew a *shortened* one, so ink and hit box disagreed by construction.
+
+On top of that, the tests asserted the same formula the code used. An assert that
+re-derives the number it just computed passes even when both are wrong, which is
+exactly how a mirrored constant ended up 7px out and a column 8px out.
+
+Process rules, from here on:
+
+12. **Measure, never re-derive.** Every header assert reads the *rendered* ink
+    boxes out of the captured frame (the selftest header table) and checks the
+    design rule against those measurements. No assert may re-implement the
+    layout arithmetic it is checking.
+13. **The selftest header table is the report.** The measured ink of every header
+    element is logged on every run, so a change that moves something shows the
+    number that moved instead of a screenshot someone has to squint at.
+14. **One computation per frame.** The paint pass and the hit-test pass must not
+    each lay the row out; whichever owns the frame hands the result to the other.
+15. **Ink is measured, not assumed.** A glyph's reserved extent is derived from
+    the numbers its painter actually draws with (radius, arm, stroke), per glyph,
+    and the two must agree to a pixel.
+
+Grounding: WCAG 2.2 SC 2.5.8 (Target Size, Minimum) requires 24x24 px targets or,
+for smaller ones, that 24px circles centred on adjacent targets' bounding boxes do
+not intersect — so hit boxes stay >= 24px while ink stays small, and the keep-out
+is a rule about *ink* bounding boxes, which is what (12) measures. Gestalt proximity:
+the gap BETWEEN clusters must exceed the gap WITHIN a cluster, so the left cluster
+(X, chip, chevron) and the right cluster (value, check) each read as one group.
+
 ## Axis rules
 
 8. Percent axes print no labels and take no gutter; byte axes keep five.

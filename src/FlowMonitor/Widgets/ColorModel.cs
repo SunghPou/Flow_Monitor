@@ -110,10 +110,11 @@ public static class SystemTheme
     }
 
     // #424242 dark, #CCCCCC light: the two card fills the picker must show.
+    // Fully opaque: at 0.98 the desktop showed through the popup.
     public static Color4 Card => CardFor(IsLight());
     public static Color4 CardFor(bool light) => light
-        ? new Color4(0.800f, 0.800f, 0.800f, 0.98f)   // #CCCCCC
-        : new Color4(0.259f, 0.259f, 0.259f, 0.98f); // #424242
+        ? new Color4(0.800f, 0.800f, 0.800f, 1f)   // #CCCCCC
+        : new Color4(0.259f, 0.259f, 0.259f, 1f); // #424242
     public static Color4 Hairline => IsLight() ? new Color4(0f, 0f, 0f, 0.20f)
                                                : new Color4(1f, 1f, 1f, 0.12f);
     public static Color4 Ink => IsLight() ? new Color4(0f, 0f, 0f, 0.87f)

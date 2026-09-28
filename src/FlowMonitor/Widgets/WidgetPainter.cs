@@ -29,8 +29,16 @@ public static class WidgetPainter
     public static readonly float BadgeGlyphHalf =
         WidgetWindow.CheckMarkSize * BadgeInk * BadgeArm
         + Math.Max(2f, WidgetWindow.CheckMarkSize * BadgeStroke) / 2f;
-    /// <summary>Drawn half-width of a metric chevron in logical px at full ease.</summary>
-    public const float ChevronGlyphHalf = 6f;
+    /// <summary>Centre-to-tip distance of a metric chevron, in logical px at full ease.</summary>
+    public const float ChevronTip = 6f;
+    /// <summary>Stroke width of a metric chevron, in logical px.</summary>
+    public const float ChevronStroke = 2.2f;
+    /// <summary>
+    /// Drawn half-extent of a metric chevron in logical px at full ease, stroke included.
+    /// HeaderLayout reserves exactly this, so the gap to the title is measured from the
+    /// stroke edge rather than from the glyph centre.
+    /// </summary>
+    public static readonly float ChevronGlyphHalf = ChevronTip + Math.Max(2f, ChevronStroke) / 2f;
     /// <summary>Corner bracket inset from the card edge, in logical px.</summary>
     public const float CornerInset = 5.5f;
     /// <summary>Corner bracket arm length, in logical px.</summary>
@@ -130,14 +138,14 @@ public static class WidgetPainter
         if (amount <= 0.01f) return;
         float s = cfg.Dpi;
         float ease = Ease(amount);
-        float w = Math.Max(2f, 2.2f * s);
+        float w = Math.Max(2f, ChevronStroke * s);
 
         var boxes = new[] { (prevLogical, true), (nextLogical, false) };
         foreach (var (lr, prev) in boxes)
         {
             if (lr.Width <= 0) continue;
             var center = new V2((lr.Left + lr.Width * 0.5f) * s, (lr.Top + lr.Height * 0.5f) * s);
-            float r = ChevronGlyphHalf * (0.70f + 0.30f * ease) * s;
+            float r = ChevronTip * (0.70f + 0.30f * ease) * s;
             var ink = res.Brush(new Color4(ArrowInk.R, ArrowInk.G, ArrowInk.B, ArrowInk.A * amount));
             dc.PushAxisAlignedClip(new RectF(0, 0, width, height), AntialiasMode.Aliased);
             if (prev)

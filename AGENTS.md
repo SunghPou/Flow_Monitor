@@ -17,3 +17,5 @@
 15. Sampler state the render thread reads is copied out under a lock (`GpuSampler.EngineSnapshot`); never enumerate a list the sampling thread rebuilds.
 16. Persist geometry on move/resize, not only on apply: `FlushPendingGeometry` saves, so a drag survives a restart without the checkmark.
 17. Popups (colour picker) paint through `ColorPickerLayout` + `SystemTheme`; ring/disc are CPU bitmaps drawn 1:1 with `DrawBitmap` (a bitmap brush re-maps DPI and smears).
+18. Layout asserts read MEASURED ink out of a captured frame; never re-derive the arithmetic under test, and never hand-fit a constant that a painter does not draw to (docs/design.md 12-15).
+19. One frame lays the row out once. Paint and hit-test must consume the same result, not two independent computations.

@@ -31,7 +31,6 @@ internal static class ColorPickerWindow
     // D2D has no polar gradient, so the wheel is a CPU bitmap.
     static ID2D1Bitmap1? _wheelBmp;
     static int _wheelPx;
-    static int _wheelValue = -1;
     static Hsv _hsv;
     static PickerPart _drag = PickerPart.None;
     static bool _cancelled;
@@ -67,6 +66,9 @@ internal static class ColorPickerWindow
                     return new IntPtr(0);
 
                 case Native.WM_MOUSEMOVE:
+                    // WM_SETCURSOR carries screen coordinates, so the last client
+                    // position is tracked here and read back for the cursor shape.
+                    _mouse = ToLogical(lParam);
                     if (_drag != PickerPart.None) { Apply(lParam); Paint(); }
                     return new IntPtr(0);
 
@@ -81,6 +83,12 @@ internal static class ColorPickerWindow
                 case Native.WM_MOUSEWHEEL:
                     Wheel(wParam);
                     return new IntPtr(0);
+
+                case Native.WM_SETCURSOR:
+                    // Blender shows its eyedropper cursor over the dropper field.
+                    Interop.EyedropperCursor.Apply(
+                        Picker.HitTest(_mouse.X, _mouse.Y) == PickerPart.Eyedropper);
+                    return new IntPtr(1);
 
                 case Native.WM_KEYDOWN:
                     if ((wParam.ToInt64() & 0xFFFF) == Native.VK_ESCAPE) { _cancelled = true; Close(); return new IntPtr(0); }
@@ -103,7 +111,13 @@ internal static class ColorPickerWindow
         return Native.DefWindowProcW(hwnd, msg, wParam, lParam);
     }
 
-    static void Close() => Native.PostMessage(_hwnd, Native.WM_CLOSE, IntPtr.Zero, IntPtr.Zero);
+    static void Close()
+    {
+        Interop.EyedropperCursor.Apply(false);
+        Native.PostMessage(_hwnd, Native.WM_CLOSE, IntPtr.Zero, IntPtr.Zero);
+    }
+
+    static (float X, float Y) _mouse;
 
     /// <summary>
     /// Shows the picker near (x, y) in screen coordinates seeded with
@@ -341,6 +355,7 @@ internal static class ColorPickerWindow
         if (_wheelBmp != null)
             dc.DrawBitmap(_wheelBmp, (RectangleF?)Square(Picker.Center, Picker.WheelR, s), 1f,
                 BitmapInterpolationMode.Linear, (RectangleF?)null);
+        DrawValueVeil(dc, res, s);
 
         DrawWheelMarker(dc, res, s);
         DrawValue(dc, res, s);
@@ -399,7 +414,10 @@ internal static class ColorPickerWindow
             var pill = S(Picker.Pill(i), s);
             dc.FillRoundedRectangle(
                 new RoundedRectangle(pill, 6f * s, 6f * s), res.Brush(SystemTheme.Pill));
-            dc.DrawText(values[i], valueFmt, new Rect(pill.X, pill.Y, pill.Width, pill.Height),
+            // FieldPad keeps the value off the box edge on the left, as on the right.
+            float pad = Picker.FieldPad * s;
+            dc.DrawText(values[i], valueFmt,
+                new Rect(pill.X + pad, pill.Y, pill.Width - pad * 2f, pill.Height),
                 res.Brush(SystemTheme.Ink));
             var label = S(Picker.PillLabel(i), s);
             dc.DrawText(Picker.PillLabels[i], labelFmt,
@@ -411,18 +429,34 @@ internal static class ColorPickerWindow
         dc.FillRectangle(div, res.Brush(SystemTheme.Hairline));
     }
 
+    /// <summary>
+    /// A pipette: rubber bulb, collar, barrel, tapered tip. Drawn along the 45
+    /// degree axis so the tip points into the pixel the user is sampling.
+    /// </summary>
     static void DrawEyedropper(ID2D1DeviceContext dc, ResourceCache res, float s)
     {
         var box = S(Picker.Eyedropper, s);
         dc.FillRoundedRectangle(new RoundedRectangle(box, 6f * s, 6f * s), res.Brush(SystemTheme.Pill));
         var ink = res.Brush(SystemTheme.Ink);
         float cx = box.X + box.Width / 2f, cy = box.Y + box.Height / 2f;
-        float r = 5f * s;
-        dc.DrawEllipse(new Ellipse(new V2(cx, cy), r, r), ink, 1.4f * s);
-        dc.DrawLine(new V2(cx, cy - r - 2.5f * s), new V2(cx, cy - r), ink, 1.4f * s);
-        dc.DrawLine(new V2(cx, cy + r), new V2(cx, cy + r + 2.5f * s), ink, 1.4f * s);
-        dc.DrawLine(new V2(cx - r - 2.5f * s, cy), new V2(cx - r, cy), ink, 1.4f * s);
-        dc.DrawLine(new V2(cx + r, cy), new V2(cx + r + 2.5f * s, cy), ink, 1.4f * s);
+        float w = 1.5f * s;
+
+        // 45 degrees, tip at the lower right: the sample direction.
+        static V2 At(float cx, float cy, float along, float across)
+        {
+            float k = MathF.Sqrt(0.5f);
+            return new V2(cx + (along * k + across * k), cy + (along * k - across * k));
+        }
+
+        float bulb = 3.1f * s, collar = 1.7f * s, barrel = 1.5f * s;
+        dc.FillEllipse(new Ellipse(At(cx, cy, -4.6f * s, 0f), bulb, bulb), ink);
+        dc.FillEllipse(new Ellipse(At(cx, cy, -0.9f * s, 0f), collar, collar), ink);
+        dc.DrawLine(At(cx, cy, -2.4f * s, 0f), At(cx, cy, 0.6f * s, 0f), ink, w * 1.6f);
+        // Barrel outline, then the taper down to the tip.
+        dc.DrawLine(At(cx, cy, 0.6f * s, -barrel), At(cx, cy, 4.2f * s, -barrel), ink, w);
+        dc.DrawLine(At(cx, cy, 0.6f * s, barrel), At(cx, cy, 4.2f * s, barrel), ink, w);
+        dc.DrawLine(At(cx, cy, 4.2f * s, -barrel), At(cx, cy, 5.6f * s, 0f), ink, w);
+        dc.DrawLine(At(cx, cy, 4.2f * s, barrel), At(cx, cy, 5.6f * s, 0f), ink, w);
     }
 
     static RectangleF S(RectangleF r, float s) => new(r.X * s, r.Y * s, r.Width * s, r.Height * s);
@@ -439,18 +473,17 @@ internal static class ColorPickerWindow
     // ------------------------------------------------------------------ bitmap
 
     // The wheel is generated at device pixels and drawn 1:1 with DrawBitmap: a bitmap
-    // brush re-maps the source through DPI and produced smeared bands here.
+    // brush re-maps the source through DPI and produced smeared bands here. The wheel
+    // is baked at full value and dimmed with an overlay, so dragging the value slider
+    // never rebuilds it (rebuilding per value step was the stutter).
     static void EnsureWheel(ID2D1DeviceContext dc)
     {
         int n = (int)MathF.Ceiling(Picker.WheelR * 2f * _scale);
-        // The wheel bakes value in, so it is rebuilt whenever value leaves its bucket.
-        int valueBucket = (int)Math.Round(_hsv.V * 40.0);
-        if (_wheelBmp == null || _wheelPx != n || _wheelValue != valueBucket)
+        if (_wheelBmp == null || _wheelPx != n)
         {
             _wheelBmp?.Dispose();
             _wheelBmp = MakeWheel(dc, n);
             _wheelPx = n;
-            _wheelValue = valueBucket;
         }
     }
 
@@ -458,7 +491,6 @@ internal static class ColorPickerWindow
     {
         float rMax = n / 2f;
         var buf = new byte[n * n * 4];
-        double v = _hsv.V;
         for (int y = 0; y < n; y++)
             for (int x = 0; x < n; x++)
             {
@@ -468,10 +500,20 @@ internal static class ColorPickerWindow
                 // Same mapping as ColorPickerLayout.HsFromPoint: hue 0 at 12 o'clock, clockwise.
                 double hue = Math.Atan2(dx, -dy) / (2.0 * Math.PI) * 360.0;
                 hue = (hue % 360.0 + 360.0) % 360.0;
-                var (cr, cg, cb) = new Hsv(hue, Math.Clamp(r / rMax, 0.0, 1.0), v).ToRgb();
+                var (cr, cg, cb) = new Hsv(hue, Math.Clamp(r / rMax, 0.0, 1.0), 1.0).ToRgb();
                 Put(buf, (y * n + x) * 4, cr, cg, cb);
             }
         return Upload(dc, n, n, buf);
+    }
+
+    /// <summary>Black veil over the rim: value is the wheel's brightness.</summary>
+    static void DrawValueVeil(ID2D1DeviceContext dc, ResourceCache res, float s)
+    {
+        float dim = 1f - (float)Math.Clamp(_hsv.V, 0.0, 1.0);
+        if (dim <= 0.002f) return;
+        dc.FillEllipse(new Ellipse(new V2(Picker.Center.X * s, Picker.Center.Y * s),
+            Picker.WheelR * s, Picker.WheelR * s),
+            res.Brush(new Color4(0f, 0f, 0f, dim)));
     }
 
     static void Put(byte[] buf, int at, byte r, byte g, byte b)

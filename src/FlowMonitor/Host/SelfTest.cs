@@ -1181,6 +1181,105 @@ public static class SelfTest
                             finally { try { gw?.Destroy(); } catch { } }
                         }
 
+                        // --- 6i. header ink table (measured, every run) ---
+                        // The header is judged on the pixels the painters produce, not on
+                        // the arithmetic that produced them (docs/design.md rules 12-15).
+                        {
+                            WidgetWindow? hw = null;
+                            try
+                            {
+                                hw = new WidgetWindow(fhost, new WidgetConfig
+                                {
+                                    Id = "selftest-header",
+                                    Width = 460,
+                                    Height = 200,
+                                    // Byte axis, so a tick column exists and the X has to
+                                    // anchor to it rather than to the corner inset.
+                                    Graph = GraphKind.Memory,
+                                    ClickThrough = ClickThroughMode.LeftClickOnly,
+                                });
+                                hw.Create(hwnd);
+                                fhost.TrackWidgetForTest(hw);
+                                for (int i = 0; i < 70; i++) fhost.Telemetry.SampleNow();
+                                int cardW = hw.Surface!.Width, cardH = hw.Surface.Height;
+
+                                void Frame(double at, float dt)
+                                {
+                                    hw!.RequestRedraw();
+                                    hw.RenderFrame(at, dt);
+                                    hw.CommitComposition();
+                                }
+
+                                // Locked row: the title and the value, nothing else.
+                                Frame(TestNow, 1f / 60f);
+                                Frame(TestNow + 1.0 / 60.0, 1f / 60f);
+                                var lockPx = hw.Surface.CaptureToPixels(fhost.Device);
+                                var locked = Elements(lockPx, cardW, cardH);
+                                Check(locked.Count == 2, "locked row draws the title and the value, nothing else",
+                                    $"{locked.Count} element(s): {Runs(locked)}");
+                                if (locked.Count == 2)
+                                {
+                                    Check(Math.Abs(locked[0].Centre - cardW * 0.5f) <= 1.5f,
+                                        "locked title is centred on the card",
+                                        $"title ink {locked[0].Left}..{locked[0].Right}, centre {locked[0].Centre:0.0} vs {cardW * 0.5f:0.0}");
+                                    Check(Math.Abs((cardW - HeaderLayout.Inset) - locked[1].Right) <= 1.5f,
+                                        "locked value sits on the right inset",
+                                        $"value ink ends {locked[1].Right}, inset edge {cardW - HeaderLayout.Inset:0.0}");
+                                }
+
+                                hw.BeginEdit();
+                                // The edit fade runs on dt (8/s), so pump realistic frames
+                                // until the badges are fully in.
+                                for (int f = 0; f < 8; f++) Frame(TestNow + 0.2 + f * 0.05, 0.05f);
+                                for (int f = 0; f < 2; f++) Frame(TestNow + 0.6 + f / 60.0, 1f / 60f);
+                                var px = hw.Surface.CaptureToPixels(fhost.Device);
+                                var e = Elements(px, cardW, cardH);
+                                // X, chip, '<', title, '>', value, check.
+                                Check(e.Count == 7, "edit row draws exactly its seven ink elements",
+                                    $"{e.Count} element(s): {Runs(e)}");
+                                if (e.Count == 7)
+                                {
+                                    Log.Info("header ink table: " + Runs(e));
+
+                                    Check(Math.Abs(e[3].Centre - cardW * 0.5f) <= 1.5f,
+                                        "title is centred on the card",
+                                        $"title ink {e[3].Left}..{e[3].Right}, centre {e[3].Centre:0.0} vs {cardW * 0.5f:0.0}");
+
+                                    // The tick column's own left ink, measured from the plot.
+                                    // Scanned over the whole axis: the column's left edge
+                                    // belongs to its widest tick, not to the short one that
+                                    // happens to sit at the bottom.
+                                    var (colInk, _) = GrayInkX(px, cardW, cardH, 0, cardW, 50);
+                                    Check(Math.Abs(e[0].Left - colInk) <= 2,
+                                        "X badge ink starts on the tick values' left edge",
+                                        $"X ink starts {e[0].Left}, tick ink starts {colInk}");
+
+                                    // Mirror with the corner clamp: the check may not come
+                                    // closer to its edge than BadgeClear.
+                                    double mirror = Math.Min(cardW - e[0].Left, cardW - HeaderLayout.BadgeClear);
+                                    Check(Math.Abs(mirror - e[6].Right) <= 1.5f,
+                                        "check badge mirrors the X, clamped at the corner",
+                                        $"check ink ends {e[6].Right}, mirrored target {mirror:0.0}");
+
+                                    // Every neighbouring pair keeps its gap, chrome pairs more.
+                                    int[] pairs = { 0, 1, 2, 3, 4, 5 };
+                                    bool gapsOk = true;
+                                    var gapText = new System.Text.StringBuilder();
+                                    foreach (int i in pairs)
+                                    {
+                                        int gap = e[i + 1].Left - e[i].Right - 1;
+                                        float need = (i is 0 or 1 or 5) ? HeaderLayout.GapChrome : HeaderLayout.GapText;
+                                        gapText.Append($"{gap}/{need:0} ");
+                                        if (gap < need) gapsOk = false;
+                                    }
+                                    Check(gapsOk, "measured header gaps hold their design tokens",
+                                        gapText.ToString().Trim());
+                                }
+                            }
+                            catch (Exception ex) { failures++; Log.Write("ERROR", "header ink test threw: " + ex); }
+                            finally { try { if (hw != null) fhost.ForgetWidgetForTest(hw); hw?.Destroy(); } catch { } }
+                        }
+
                         // --- 6g. card contact sheet (--capture only) ---
                         // One capture per GraphKind on real telemetry, locked and edit,
                         // so every card can be eyeballed instead of assumed correct.
@@ -1683,6 +1782,77 @@ public static class SelfTest
                 { if (x < minX) minX = x; if (x > maxX) maxX = x; }
             }
         return maxX < 0 ? (-1, -1) : (minX, maxX);
+    }
+
+    /// <summary>
+    /// One horizontal run of header ink: (first column, last column). Measured out of
+    /// the rendered pixels, never out of the layout's own arithmetic (design.md 12).
+    /// </summary>
+    readonly record struct InkRun(int Left, int Right)
+    {
+        public float Centre => (Left + Right) * 0.5f;
+    }
+
+    /// <summary>
+    /// Ink predicate for the header strip: near-white glyphs and text, or a saturated
+    /// chip. Gridlines (white at 5%) and the panel fill stay well under the threshold.
+    /// </summary>
+    static bool HeaderInk(byte[] px, int i)
+    {
+        byte b = px[i], g = px[i + 1], r = px[i + 2], a = px[i + 3];
+        if (a < 100) return false;
+        int lo = Math.Min(b, Math.Min(g, r)), hi = Math.Max(b, Math.Max(g, r));
+        return hi >= 110 && (lo >= 90 || hi - lo >= 40);
+    }
+
+    /// <summary>
+    /// Column runs of header ink in a horizontal band, merging gaps under
+    /// <paramref name="merge"/> px so anti-aliasing cannot split one glyph in two.
+    /// </summary>
+    static List<InkRun> InkRuns(byte[] px, int w, int h, int yLo, int yHi, int merge = 2)
+    {
+        var runs = new List<InkRun>();
+        int start = -1, last = -1;
+        for (int x = 0; x < w; x++)
+        {
+            bool hit = false;
+            for (int y = Math.Max(0, yLo); y < Math.Min(h, yHi); y++)
+                if (HeaderInk(px, (y * w + x) * 4)) { hit = true; break; }
+            if (!hit) continue;
+            if (start < 0) start = last = x;
+            else if (x - last <= merge + 1) last = x;
+            else { runs.Add(new InkRun(start, last)); start = last = x; }
+        }
+        if (start >= 0) runs.Add(new InkRun(start, last));
+        return runs;
+    }
+
+    /// <summary>
+    /// Ink runs joined into elements: a gap at least <c>minGap</c> starts a new element,
+    /// so one word split by its own letter spacing stays one element (design.md 12).
+    /// </summary>
+    static List<InkRun> Elements(byte[] px, int w, int h, float minGap = HeaderLayout.GapText)
+    {
+        var runs = InkRuns(px, w, h, 6, 32);
+        if (minGap <= 0 || runs.Count < 2) return runs;
+        int gap = (int)minGap;
+        var merged = new List<InkRun>();
+        foreach (var r in runs)
+        {
+            if (merged.Count > 0 && r.Left - merged[^1].Right - 1 < gap)
+                merged[^1] = new InkRun(merged[^1].Left, r.Right);
+            else
+                merged.Add(r);
+        }
+        return merged;
+    }
+
+    /// <summary>Compact "l..r" list of ink runs, for assertion messages.</summary>
+    static string Runs(List<InkRun> runs)
+    {
+        var parts = new string[runs.Count];
+        for (int i = 0; i < runs.Count; i++) parts[i] = $"[{runs[i].Left}..{runs[i].Right}]";
+        return string.Join(" ", parts);
     }
 
     /// <summary>Whether any accent pixel sits within (dx, dy) of a point.</summary>

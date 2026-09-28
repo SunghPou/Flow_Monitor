@@ -120,7 +120,7 @@ public sealed class ChartRenderer
     /// size, which may disagree with the actual render target.
     /// </summary>
     public void Draw(ID2D1DeviceContext dc, WidgetConfig cfg, ChartModel model, float dpi, double now,
-        float width, float height)
+        float width, float height, Widgets.HeaderLayout? headerLayout = null)
     {
         _frameChanged = false;
         float s = dpi / 96f;
@@ -131,18 +131,18 @@ public sealed class ChartRenderer
         // Title + value only, laid out by HeaderLayout (docs/design.md): the
         // < title > group is centred on the card, the value is right-anchored, and
         // the title yields width so the two can never touch. The badges anchor to the
-        // tick column, so the X lines up with the axis values.
+        // tick column, so the X lines up with the axis values. The owner of the frame
+        // passes the layout it already computed for its hit boxes, so one frame lays
+        // the row out once; standalone callers let the renderer do it.
         if (cfg.ShowLabels)
         {
-            string text = !cfg.ShowUnits || string.IsNullOrEmpty(model.ValueUnit)
-                ? model.ValueText
-                : model.ValueText + (TightUnit(model.ValueUnit) ? "" : " ") + model.ValueUnit;
-
+            string text = HeaderValueText(cfg, model);
             float titleW = _res.Measure(model.Title, _res.Title, s).Width / s;
             float valueW = _res.Measure(text, _res.HeaderValue, s).Width / s;
             float logicalW = bounds.Width / s;
-            var header = Widgets.HeaderLayout.Compute(logicalW, titleW, valueW, model.EditChrome,
-                geo.LabelColumnX);
+            var header = headerLayout
+                ?? Widgets.HeaderLayout.Compute(logicalW, titleW, valueW, model.EditChrome,
+                    geo.LabelColumnX);
 
             var titleRect = new RectF(header.Title.X * s, header.Title.Y * s,
                 header.Title.Width * s, header.Title.Height * s);
@@ -626,6 +626,16 @@ public sealed class ChartRenderer
     /// fewer decimals, then an ellipsized tail. The value yields space so the
     /// centred &lt; title &gt; group never moves (docs/design.md).
     /// </summary>
+    /// <summary>
+    /// The header's value string: the number plus its unit, tight for % and rates.
+    /// One definition, so the layout that reserves the width and the painter that
+    /// draws the text can never disagree on the text.
+    /// </summary>
+    public static string HeaderValueText(WidgetConfig cfg, ChartModel model)
+        => !cfg.ShowUnits || string.IsNullOrEmpty(model.ValueUnit)
+            ? model.ValueText
+            : model.ValueText + (TightUnit(model.ValueUnit) ? "" : " ") + model.ValueUnit;
+
     string FitValue(string text, float maxW, float s)
     {
         if (maxW <= 0f || ValueWidth(text, s) <= maxW) return text;

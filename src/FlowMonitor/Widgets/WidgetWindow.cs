@@ -707,29 +707,29 @@ public sealed class WidgetWindow
 
         var model = _host.BuildChart(Config, now);
 
-        // Edit chrome flag plus the header layout for this frame; the chevron and badge
-        // Edit chrome flag plus the header layout for this frame; the chevron and badge
-        // boxes stored here are what the hit test uses, so clicks land where paint drew.
-        // RENDER THREAD: apply pending resize before reading the surface size, so the
-        // header and the chart lay out against the size actually being painted.
+        // This frame's header is laid out ONCE here: the boxes stored below drive the
+        // hit test, and the same result is handed to the renderer that paints the
+        // title and value, so paint and hit-test cannot disagree
+        // (docs/design.md header rule 14). RENDER THREAD: apply pending resize before
+        // reading the surface size, so the header and the chart lay out against the
+        // size actually being painted.
         model.EditChrome = editing;
         surface.ApplyPendingResize();
+        HeaderLayout header;
         {
             var res = _host.Resources;
-            string valueText = Config.ShowUnits && !string.IsNullOrEmpty(model.ValueUnit)
-                ? model.ValueText + " " + model.ValueUnit
-                : model.ValueText;
+            string valueText = ChartRenderer.HeaderValueText(Config, model);
             float titleW = res.Measure(model.Title, res.Title, Config.Dpi).Width / Config.Dpi;
             float valueW = res.Measure(valueText, res.HeaderValue, Config.Dpi).Width / Config.Dpi;
             // The badges ride the tick column, so the header needs the plot geometry too.
             float anchorX = _charts.Geometry(Config, model, Config.Dpi, surface.Width, surface.Height)
                 .LabelColumnX;
-            var layout = HeaderLayout.Compute(_width, titleW, valueW, editing, anchorX);
-            _prevMetricRect = layout.Prev;
-            _nextMetricRect = layout.Next;
-            _closeRect = layout.Close;
-            _checkRect = layout.Check;
-            _chipRect = layout.Chip;
+            header = HeaderLayout.Compute(_width, titleW, valueW, editing, anchorX);
+            _prevMetricRect = header.Prev;
+            _nextMetricRect = header.Next;
+            _closeRect = header.Close;
+            _checkRect = header.Check;
+            _chipRect = header.Chip;
         }
         var dc = surface.Context;
         // Paint against surface real pixel size; _width/_height are logical units.
@@ -739,7 +739,7 @@ public sealed class WidgetWindow
         // Clear transparent; card is rounded so previous frame remains in corners.
         dc.Clear(new Vortice.Mathematics.Color4(0f, 0f, 0f, 0f));
         WidgetPainter.PaintBackground(dc, _host.Resources, Config, w, h, _hoverAmount, _checkAmount, editing);
-        _charts.Draw(dc, Config, model, Config.Dpi * 96f, now, surface.Width, surface.Height);
+        _charts.Draw(dc, Config, model, Config.Dpi * 96f, now, surface.Width, surface.Height, header);
         WidgetPainter.PaintCloseButton(dc, _host.Resources, Config, w, h, _closeRect, _checkAmount, _closeHover);
         WidgetPainter.PaintCheckMark(dc, _host.Resources, Config, w, h, _checkRect, _checkAmount, _checkHover);
         WidgetPainter.PaintColorChip(dc, _host.Resources, Config, w, h, _checkAmount, _chipRect,
