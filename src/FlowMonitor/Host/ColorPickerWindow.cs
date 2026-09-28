@@ -414,18 +414,21 @@ internal static class ColorPickerWindow
     /// mouse sets its own on each move, and watches for Esc, which arrives no other way
     /// once the card no longer holds focus.
     /// </summary>
+    /// <summary>
+    /// Desktop pick. The card stays up - hiding it tore down the composition target and
+    /// the picker's WM_ACTIVATE handler closed the popup, so the card vanished on click.
+    /// A click anywhere on the desktop is caught by the system-wide hook and applied.
+    /// </summary>
     static void PickScreen()
     {
         _picking = true;
-        Native.ShowWindow(_hwnd, 0 /* SW_HIDE */);
         Interop.GlobalMouseHook.Clicked += OnPicked;
         Interop.GlobalMouseHook.Install();
         try
         {
-            Native.GetCursorPos(out _);
-            Native.SetCursor(Interop.EyedropperCursor.Handle);
+            Interop.EyedropperCursor.Apply(true);
             Native.SetTimer(_hwnd, PickTimerId, PickTimerMs, IntPtr.Zero);
-            while (!_done)
+            while (!_done && _hwnd != IntPtr.Zero)
             {
                 int r = Native.GetMessageW(out var msg, IntPtr.Zero, 0, 0);
                 if (r <= 0) break;
@@ -443,7 +446,6 @@ internal static class ColorPickerWindow
             Interop.EyedropperCursor.Apply(false);
         }
         if (_hwnd == IntPtr.Zero) return;               // the pick loop tore the card down
-        Native.ShowWindow(_hwnd, 5 /* SW_SHOW */);
         Native.SetForegroundWindow(_hwnd);
         Native.SetCapture(_hwnd);
         Paint();
@@ -452,6 +454,9 @@ internal static class ColorPickerWindow
     /// <summary>Runs on our thread inside our own pump, with the click's screen coordinates.</summary>
     static void OnPicked(int x, int y)
     {
+        // A click on the card itself belongs to the card, not to the desktop sample.
+        if (_hwnd != IntPtr.Zero && Native.GetWindowRect(_hwnd, out var card)
+            && x >= card.Left && x < card.Right && y >= card.Top && y < card.Bottom) return;
         var rgb = Interop.ScreenPick.SampleAt(x, y);
         if (rgb is Rgba picked) { _hsv = picked.ToHsv(); NotifyChanged(); }
         _done = true;
