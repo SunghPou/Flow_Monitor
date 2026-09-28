@@ -15,7 +15,8 @@ namespace FlowMonitor.Widgets;
 /// Each primitive becomes its OWN geometry. D2D fills a path geometry with the
 /// even-odd rule, so two crossing capsules in one geometry cancel their overlap and
 /// punch a hole where the arms cross. Separate geometries are separate fills, and an
-/// opaque fill over an opaque fill leaves no seam.
+/// opaque fill over an opaque fill leaves no seam. The badge glyphs therefore spell their
+/// round caps as points of one contour rather than stacking capsules.
 /// </summary>
 public static class GlyphGeometry
 {
@@ -60,6 +61,22 @@ public static class GlyphGeometry
         pts[n++] = new V2((float)(c.X + nx * co + ux * si), (float)(c.Y + ny * co + uy * si));
     }
 
+    /// <summary>
+    /// The semicircle that caps a bar of half-thickness t at its free end: from c + n*t
+    /// around the outside through c + u*t to c - n*t, as points on the SAME contour as the
+    /// bar's edges. 11 chords per cap is under a tenth of a pixel of chord error at badge
+    /// sizes, so the cap is a polygon of the outline, not a second filled region.
+    /// </summary>
+    static void Cap(List<V2> pts, V2 c, V2 n, V2 u, float t, int seg = 10)
+    {
+        for (int i = 0; i <= seg; i++)
+        {
+            double th = Math.PI * i / seg;
+            double co = Math.Cos(th) * t, si = Math.Sin(th) * t;
+            pts.Add(new V2((float)(c.X + n.X * co + u.X * si), (float)(c.Y + n.Y * co + u.Y * si)));
+        }
+    }
+
     /// <summary>A filled disc of radius r (a round join, a bulb, a dot).</summary>
     public static void Disc(V2 c, float r, int seg = 20)
     {
@@ -85,22 +102,29 @@ public static class GlyphGeometry
     }
 
     /// <summary>
-    /// The close X: two equal arms at 45 degrees. `half` is the ink half-extent, so the
-    /// cap centre sits at (half - t) along the diagonal.
+    /// The close X: two equal arms at 45 degrees, each arm ending in a round cap. `half`
+    /// is the ink half-extent, measured to the cap tips.
     /// </summary>
-
     public static void X(V2 c, float half)
     {
-        // A plus rotated 45 degrees, as ONE closed contour. Two capsules would be two
-        // regions: the crossing would composite twice and read brighter than the arms
-        // (docs/design.md icon rule 24). Bar half-width 0.155 of the icon, arm half
-        // length 0.5.
-        const float L = 0.5f, W = 0.155f;
-        Emit(c, half, MathF.PI / 4f,
-        [
-            (L, W), (W, W), (W, L), (-W, L), (-W, W), (-L, W),
-            (-L, -W), (-W, -W), (-W, -L), (W, -L), (W, -W), (L, -W),
-        ]);
+        // A plus rotated 45 degrees, as ONE closed contour: a 12-gon whose four end edges
+        // are swapped for semicircular caps of radius W. Two capsules would be two regions,
+        // so the crossing would composite twice and read brighter than the arms
+        // (docs/design.md icon rule 24); the four notches between arms stay sharp.
+        // W is the bar half-width against the cap centre's L: at 0.135 the bar is 0.552 of
+        // the fitted ink half-extent, which is what the tick's Bar is tuned to match.
+        const float L = 0.5f, W = 0.135f;
+        V2[] arms = [new(0f, 1f), new(-1f, 0f), new(0f, -1f), new(1f, 0f)];
+        var pts = new List<V2>();
+        for (int i = 0; i < arms.Length; i++)
+        {
+            var a = arms[i];
+            Cap(pts, a * L, new V2(a.Y, -a.X), a, W);
+            // The concave corner, where this arm's inner edge meets the next arm's. Drop
+            // it and the straight cap-to-cap edge fills the notch in as a blob.
+            pts.Add((a + arms[(i + 1) % arms.Length]) * W);
+        }
+        Emit(c, half, MathF.PI / 4f, pts);
     }
 
     /// <summary>
@@ -111,33 +135,30 @@ public static class GlyphGeometry
     public static void Check(V2 c, float half)
     {
         // Spine: short arm up-left, then a longer arm up-right, joined at the elbow.
-        (float X, float Y)[] spine = [(0.02f, 0.50f), (0.36f, 0.90f), (0.98f, 0.16f)];
-        const float Bar = 0.19f;   // half the bar width, in the unit box
+        V2[] spine = [new(0.02f, 0.50f), new(0.36f, 0.90f), new(0.98f, 0.16f)];
+        // Bar half-width in the unit box. 0.183 is the X's 0.135 rescaled for this spine's
+        // fitted ink width, so the two badges carry the same bar (0.552 of the ink).
+        const float Bar = 0.183f;
 
-        V2 Dir(int i)
-        {
-            var a = new V2(spine[i].X, spine[i].Y);
-            var b = new V2(spine[i + 1].X, spine[i + 1].Y);
-            var d = V2.Normalize(b - a);
-            return new V2(-d.Y, d.X);
-        }
-
-        var n0 = Dir(0);
-        var n1 = Dir(1);
+        V2 Dir(int i) => V2.Normalize(spine[i + 1] - spine[i]);
+        var d0 = Dir(0);
+        var d1 = Dir(1);
+        var n0 = new V2(-d0.Y, d0.X);      // across the bar
+        var n1 = new V2(-d1.Y, d1.X);
         // Miter at the elbow so the two bar edges meet in a single corner, which keeps
         // the outline simple: an overlapping pair would cancel under the even-odd fill.
         var mid = V2.Normalize(n0 + n1);
         float scale = 1f / MathF.Max(0.4f, V2.Dot(mid, n1));
 
-        Emit(c, half, 0f,
-        [
-            (spine[0].X + n0.X * Bar, spine[0].Y + n0.Y * Bar),
-            (spine[1].X + mid.X * Bar * scale, spine[1].Y + mid.Y * Bar * scale),
-            (spine[2].X + n1.X * Bar, spine[2].Y + n1.Y * Bar),
-            (spine[2].X - n1.X * Bar, spine[2].Y - n1.Y * Bar),
-            (spine[1].X - mid.X * Bar * scale, spine[1].Y - mid.Y * Bar * scale),
-            (spine[0].X - n0.X * Bar, spine[0].Y - n0.Y * Bar),
-        ]);
+        var pts = new List<V2>
+        {
+            spine[0] + n0 * Bar,               // outer edge of the short arm
+            spine[1] + mid * Bar * scale,      // outer corner at the elbow
+        };
+        Cap(pts, spine[2], n1, d1, Bar);       // cap on the long arm
+        pts.Add(spine[1] - mid * Bar * scale); // inner corner at the elbow
+        Cap(pts, spine[0], n0, -d0, Bar);      // cap on the short arm
+        Emit(c, half, 0f, pts);
     }
 
     /// <summary>
@@ -146,14 +167,14 @@ public static class GlyphGeometry
     /// lands on c. Centring the measured ink (not the point cloud's origin) is what puts
     /// an asymmetric glyph such as the tick under the centre the layout reserved.
     /// </summary>
-    static void Emit(V2 c, float half, float rotation, (float X, float Y)[] pts)
+    static void Emit(V2 c, float half, float rotation, List<V2> pts)
     {
         var sin = MathF.Sin(rotation);
         var cos = MathF.Cos(rotation);
         float minX = float.MaxValue, maxX = float.MinValue;
         float minY = float.MaxValue, maxY = float.MinValue;
-        var mapped = new V2[pts.Length];
-        for (int i = 0; i < pts.Length; i++)
+        var mapped = new V2[pts.Count];
+        for (int i = 0; i < mapped.Length; i++)
         {
             var p = new V2(pts[i].X * cos - pts[i].Y * sin, pts[i].X * sin + pts[i].Y * cos);
             mapped[i] = p;
