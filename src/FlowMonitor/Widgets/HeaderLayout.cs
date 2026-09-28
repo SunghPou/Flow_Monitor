@@ -27,7 +27,20 @@ public readonly record struct HeaderLayout(RectF Value, RectF Title, RectF Prev,
     public const float ChipDia = 16f;      // colour chip swatch (edit mode only)
     public const float ChevBox = 26f;     // metric chevron hit box (square)
     public const float ChevGap = 8f;      // chevron hit box to title ink
-    public const float RowCenter = 19f;   // the one optical center of the row
+    /// <summary>
+    /// The header row is EVERY element in the widget's upper part except the corner
+    /// brackets, and they move as one: the badges, the chip, the chevrons, the title and
+    /// the value all take their y from this one centre. It is the middle of the band
+    /// between the widget's top edge and the first horizontal line (the plot's top edge),
+    /// so the row always sits centred in the space above the chart. <see cref="RowCenter"/>
+    /// is only the fallback for callers with no plot geometry.
+    /// </summary>
+    public const float RowCenter = 19f;
+    /// <summary>Smallest band that still holds a badge box plus a little air.</summary>
+    public const float MinRowBand = 38f;
+    /// <summary>Row centre for a band of <paramref name="bandLogical"/> logical px under the top edge.</summary>
+    public static float RowCenterFor(float bandLogical) => Math.Max(bandLogical, MinRowBand) / 2f;
+
     const float TitleH = 15f;
     const float ValueH = 26f;
 
@@ -37,7 +50,8 @@ public readonly record struct HeaderLayout(RectF Value, RectF Title, RectF Prev,
     /// centre line, never coming closer to its edge than <see cref="BadgeClear"/> so it
     /// keeps clear of the top-right bracket. anchorX 0 means no tick column.
     /// </summary>
-    public static (RectF Close, RectF Check) BadgeRects(float logicalW, float anchorX)
+    public static (RectF Close, RectF Check) BadgeRects(float logicalW, float anchorX,
+        float rowCenter = RowCenter)
     {
         // anchorX > 0: the tick column's left ink edge, so the X heads the values.
         // anchorX == 0: no column, sit at the preferred BadgeClear inset.
@@ -46,8 +60,8 @@ public readonly record struct HeaderLayout(RectF Value, RectF Title, RectF Prev,
         // Mirror the X, but never closer to the right edge than the bracket it clears.
         float checkInkR = Math.Min(logicalW - inkL, logicalW - BadgeClear);
         float checkCenter = checkInkR - WidgetPainter.BadgeGlyphHalf;
-        return (new RectF(xCenter - BadgeBox / 2f, RowCenter - BadgeBox / 2f, BadgeBox, BadgeBox),
-                new RectF(checkCenter - BadgeBox / 2f, RowCenter - BadgeBox / 2f, BadgeBox, BadgeBox));
+        return (new RectF(xCenter - BadgeBox / 2f, rowCenter - BadgeBox / 2f, BadgeBox, BadgeBox),
+                new RectF(checkCenter - BadgeBox / 2f, rowCenter - BadgeBox / 2f, BadgeBox, BadgeBox));
     }
 
     /// <summary>Left edge of a badge glyph's ink: the box pad plus the glyph half.</summary>
@@ -59,12 +73,12 @@ public readonly record struct HeaderLayout(RectF Value, RectF Title, RectF Prev,
     /// Chevron hit box of at most ChevBox centred on its glyph, held inside
     /// [minL, maxR]: a clamp shortens the box instead of sliding it off the glyph.
     /// </summary>
-    static RectF ChevHitBox(float glyphCenter, float minL, float maxR)
+    static RectF ChevHitBox(float glyphCenter, float minL, float maxR, float rowCenter)
     {
         float l = glyphCenter - ChevBox / 2f, r = glyphCenter + ChevBox / 2f;
         if (l < minL) { r = Math.Min(r + (minL - l), maxR); l = minL; }
         if (r > maxR) { l = Math.Max(l - (r - maxR), minL); r = maxR; }
-        return new RectF(l, RowCenter - ChevBox / 2f, Math.Max(0f, r - l), ChevBox);
+        return new RectF(l, rowCenter - ChevBox / 2f, Math.Max(0f, r - l), ChevBox);
     }
 
     /// <summary>
@@ -76,9 +90,9 @@ public readonly record struct HeaderLayout(RectF Value, RectF Title, RectF Prev,
     /// all clips the title.
     /// </summary>
     public static HeaderLayout Compute(float logicalW, float titleW, float valueW, bool editing,
-        float anchorX = 0f)
+        float anchorX = 0f, float rowCenter = RowCenter)
     {
-        var (close, check) = editing ? BadgeRects(logicalW, anchorX) : (RectF.Empty, RectF.Empty);
+        var (close, check) = editing ? BadgeRects(logicalW, anchorX, rowCenter) : (RectF.Empty, RectF.Empty);
 
         // The group = [<] gap title gap [>]; each chevron reserves ChevGap plus its
         // glyph half beyond the title, so the ink group is symmetric about the title.
@@ -98,16 +112,16 @@ public readonly record struct HeaderLayout(RectF Value, RectF Title, RectF Prev,
         float valueLeft = valueRight - valueW2;
 
         float tx = cx - titleW2 / 2f;
-        var title = new RectF(tx, RowCenter - TitleH / 2f, titleW2 + 1f, TitleH);
-        var value = new RectF(valueLeft, RowCenter - ValueH / 2f, valueW2, ValueH);
+        var title = new RectF(tx, rowCenter - TitleH / 2f, titleW2 + 1f, TitleH);
+        var value = new RectF(valueLeft, rowCenter - ValueH / 2f, valueW2, ValueH);
 
         RectF prev = RectF.Empty, next = RectF.Empty;
         if (editing)
         {
             // Hit boxes are wider than the ink: each is centred on its glyph and may
             // overhang into the gap, but never past the value, the X badge or the edge.
-            prev = ChevHitBox(tx - ChevGap - WidgetPainter.ChevronGlyphHalf, leftReserve, valueLeft);
-            next = ChevHitBox(tx + titleW2 + ChevGap + WidgetPainter.ChevronGlyphHalf, leftReserve, valueLeft);
+            prev = ChevHitBox(tx - ChevGap - WidgetPainter.ChevronGlyphHalf, leftReserve, valueLeft, rowCenter);
+            next = ChevHitBox(tx + titleW2 + ChevGap + WidgetPainter.ChevronGlyphHalf, leftReserve, valueLeft, rowCenter);
         }
         // The colour chip opens the picker. It is pushed against the centred group
         // (GapChrome clear of its left ink edge) so it sits in the gap between the
@@ -118,7 +132,7 @@ public readonly record struct HeaderLayout(RectF Value, RectF Title, RectF Prev,
             float groupInkLeft = tx - inkPad;
             float chipRight = groupInkLeft - GapChrome;
             if (leftReserve + ChipDia + GapText <= chipRight)
-                chip = new RectF(chipRight - ChipDia, RowCenter - ChipDia / 2f, ChipDia, ChipDia);
+                chip = new RectF(chipRight - ChipDia, rowCenter - ChipDia / 2f, ChipDia, ChipDia);
         }
         return new HeaderLayout(value, title, prev, next, close, check, chip, valueMax);
     }

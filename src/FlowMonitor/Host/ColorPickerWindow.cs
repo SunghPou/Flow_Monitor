@@ -173,13 +173,6 @@ internal static class ColorPickerWindow
     /// <summary>What the numbers show: the same colour in the card's working space.</summary>
     static Rgba Shown() => _space == PickerSpace.Linear ? Current().ToLinear() : Current();
 
-    /// <summary>Fully saturated current hue at the current value, used to tint the value bar.</summary>
-    static Rgba Pure()
-    {
-        var (r, g, b) = new Hsv(_hsv.H, 1.0, _hsv.V).ToRgb();
-        return new Rgba(r, g, b, _alpha);
-    }
-
     static void Run(IRenderHost host, WidgetWindow widget, int x, int y)
     {
         RegisterClass();
@@ -481,32 +474,39 @@ internal static class ColorPickerWindow
         => dc.DrawEllipse(new Ellipse(new V2(x + d / 2f, y + d / 2f), d / 2f, d / 2f), brush, width);
 
     /// <summary>
-    /// Blender's value bar for the circle picker: a thin vertical gradient immediately
-    /// right of the wheel, not a full-width horizontal one (GRAD_V_ALT, PICKER_BAR wide).
+    /// Blender's value bar for the circle picker, ported from draw_but_HSV_v
+    /// (interface_widgets.cc): a NEUTRAL black-to-white ramp that never takes the hue
+    /// and never changes as the handle moves, a 1px outline, and a black handle bar
+    /// with a grey core of the current value that grows a pixel while it is held.
     /// </summary>
     static void DrawValueBar(ID2D1DeviceContext dc, ResourceCache res, float s)
     {
         var track = S(Picker.ValueTrack, s);
-        var pure = Pure();
-
-        // Black at the top, the full hue at the bottom.
-        var pureShown = _space == PickerSpace.Linear ? pure.ToLinear() : pure;
+        float r = track.Width / 2f;
         var props = new LinearGradientBrushProperties(
             new V2(0f, track.Top), new V2(0f, track.Bottom));
         using var stops = dc.CreateGradientStopCollection(
         [
             new GradientStop(0f, new Color4(0f, 0f, 0f, 1f)),
-            new GradientStop(1f, pureShown.ToColor4()),
+            new GradientStop(1f, new Color4(1f, 1f, 1f, 1f)),
         ], Gamma.Linear, ExtendMode.Clamp);
-        using var grad = dc.CreateLinearGradientBrush(props, stops);
-        float r = track.Width / 2f;
-        dc.FillRoundedRectangle(new RoundedRectangle(track, r, r), grad);
+        using var ramp = dc.CreateLinearGradientBrush(props, stops);
+        dc.FillRoundedRectangle(new RoundedRectangle(track, r, r), ramp);
+        dc.DrawRoundedRectangle(new RoundedRectangle(track, r, r), res.Brush(new Color4(0f, 0f, 0f, 0.8f)), 1f * s);
 
-        // The reference card's handle is a short white bar across the track, not a ring.
-        float hy = Picker.YFromValue(_hsv.V) * s;
-        float hx = track.Left - 2f * s, hw = track.Width + 4f * s, hh = 4f * s;
-        dc.FillRoundedRectangle(new RoundedRectangle(new RectangleF(hx, hy - hh / 2f, hw, hh), hh / 2f, hh / 2f),
-            res.Brush(new Color4(1f, 1f, 1f, 1f)));
+        // Handle: max(width * 0.35, 1) tall, held 2px inside each end, black with the
+        // current value as its grey core, one pixel bigger on every side while pressed.
+        float grow = _drag == PickerPart.Value ? 1f * s : 0f;
+        float h = MathF.Max(track.Width * 0.35f, 1f * s);
+        float y = Picker.YFromValue(_hsv.V) * s;
+        y = Math.Clamp(y, track.Top + 2f * s, track.Bottom - 2f * s);
+        float v = (float)Math.Clamp(_hsv.V, 0.0, 1.0);
+        var handle = new RectangleF(track.Left - grow, y - h / 2f - grow,
+            track.Width + grow * 2f, h + grow * 2f);
+        dc.FillRoundedRectangle(new RoundedRectangle(handle, 0f, 0f), res.Brush(new Color4(0f, 0f, 0f, 1f)));
+        if (h > 2f * s)
+            dc.FillRectangle(new RectangleF(handle.X + 1f * s, handle.Y + 1f * s,
+                handle.Width - 2f * s, handle.Height - 2f * s), res.Brush(new Color4(v, v, v, 1f)));
     }
 
     /// <summary>

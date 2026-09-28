@@ -748,8 +748,14 @@ public static class SelfTest
                     "the vertical value bar and its handle are inverses",
                     $"value 0.62 -> y {vy:0.0} -> {ColorPickerLayout.ValueFromY(vy):0.000}");
 
-                Check(ColorPickerLayout.ValueTrack.Left >= ColorPickerLayout.Center.X + ColorPickerLayout.WheelR
-                    && ColorPickerLayout.ValueTrack.Width < 40f,
+                // Blender's draw_but_HSV_v: y = ymin + v * height, so black and zero sit
+                // together at the top and full brightness at the bottom.
+                Check(Math.Abs(ColorPickerLayout.YFromValue(0) - ColorPickerLayout.ValueTrack.Top) < 0.01f
+                    && Math.Abs(ColorPickerLayout.YFromValue(1) - ColorPickerLayout.ValueTrack.Bottom) < 0.01f,
+                    "the value handle runs top to bottom like Blender's, not upside down",
+                    $"v=0 at y {ColorPickerLayout.YFromValue(0):0.0} (track top {ColorPickerLayout.ValueTrack.Top:0.0}), v=1 at y {ColorPickerLayout.YFromValue(1):0.0} (track bottom {ColorPickerLayout.ValueTrack.Bottom:0.0})");
+
+                Check(ColorPickerLayout.ValueTrack.Left >= ColorPickerLayout.Center.X + ColorPickerLayout.WheelR                    && ColorPickerLayout.ValueTrack.Width < 40f,
                     "the value bar stands beside the wheel, not under it",
                     $"bar at x {ColorPickerLayout.ValueTrack.Left:0}..{ColorPickerLayout.ValueTrack.Right:0} ({ColorPickerLayout.ValueTrack.Width:0}px wide) beside a wheel ending at {ColorPickerLayout.Center.X + ColorPickerLayout.WheelR:0}");
 
@@ -805,6 +811,22 @@ public static class SelfTest
                     && Math.Abs(dark.G - dark.R) < 0.002f && Math.Abs(dark.B - dark.R) < 0.002f,
                     "picker card fill follows the system theme",
                     $"dark #424242 -> {dark.R * 255:0} ({dark.G * 255:0},{dark.B * 255:0}), light #CCCCCC -> {light.R * 255:0}");
+
+                // The header is the whole upper band: every element takes its y from one
+                // centre, the middle of the space between the top edge and the first line.
+                float band = HeaderLayout.RowCenterFor(50f);
+                var bandRow = HeaderLayout.Compute(460, titleW: 45, valueW: 110, editing: true,
+                    anchorX: 0f, rowCenter: band);
+                float[] centres = [bandRow.Close.Top + bandRow.Close.Height / 2f,
+                    bandRow.Check.Top + bandRow.Check.Height / 2f,
+                    bandRow.Prev.Top + bandRow.Prev.Height / 2f,
+                    bandRow.Next.Top + bandRow.Next.Height / 2f,
+                    bandRow.Title.Top + bandRow.Title.Height / 2f,
+                    bandRow.Value.Top + bandRow.Value.Height / 2f,
+                    bandRow.Chip.Top + bandRow.Chip.Height / 2f];
+                Check(Math.Abs(band - 25f) < 0.01f && centres.All(c => Math.Abs(c - band) < 0.01f),
+                    "every header element centres in the band above the chart",
+                    $"band 0..50 -> centre {band:0.0}; element centres [{string.Join(", ", centres.Select(c => c.ToString("0.0")))}]");
 
                 // The chip sits between the X badge and the centred group, right-aligned
                 // against the group, and is dropped rather than allowed to move it.

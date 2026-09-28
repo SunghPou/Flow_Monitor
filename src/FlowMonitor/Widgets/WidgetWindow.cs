@@ -721,10 +721,12 @@ public sealed class WidgetWindow
             string valueText = ChartRenderer.HeaderValueText(Config, model);
             float titleW = res.Measure(model.Title, res.Title, Config.Dpi).Width / Config.Dpi;
             float valueW = res.Measure(valueText, res.HeaderValue, Config.Dpi).Width / Config.Dpi;
-            // The badges ride the tick column, so the header needs the plot geometry too.
-            float anchorX = _charts.Geometry(Config, model, Config.Dpi, surface.Width, surface.Height)
-                .LabelColumnX;
-            header = HeaderLayout.Compute(_width, titleW, valueW, editing, anchorX);
+            // The badges ride the tick column and the whole row is centred in the band
+            // above the chart, so the header needs the plot geometry: its left edge is
+            // the tick column, its top edge is the first horizontal line.
+            var geo = _charts.Geometry(Config, model, Config.Dpi, surface.Width, surface.Height);
+            float rowCenter = HeaderLayout.RowCenterFor(geo.Rect.Top / Config.Dpi);
+            header = HeaderLayout.Compute(_width, titleW, valueW, editing, geo.LabelColumnX, rowCenter);
             _prevMetricRect = header.Prev;
             _nextMetricRect = header.Next;
             _closeRect = header.Close;

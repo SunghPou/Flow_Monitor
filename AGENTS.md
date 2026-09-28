@@ -20,3 +20,4 @@
 18. Layout asserts read MEASURED ink out of a captured frame; never re-derive the arithmetic under test, and never hand-fit a constant that a painter does not draw to (docs/design.md 12-15).
 19. One frame lays the row out once. Paint and hit-test must consume the same result, not two independent computations.
 20. Nothing is drawn flush to a container edge: every element inside a card, chip, segment, field or row is inset by the shared InnerPad on all four sides (docs/design.md 21-23). A number typed at a call site is a bug.
+21. The header is one row: every upper element takes its y from HeaderLayout.RowCenterFor and moves together. A control never colours itself with the value it edits (docs/design.md 21-22).

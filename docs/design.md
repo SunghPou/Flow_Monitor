@@ -112,6 +112,17 @@ the gap BETWEEN clusters must exceed the gap WITHIN a cluster, so the left clust
 20. The card is Blender's circle-HSV picker row for row: the wheel with a thin vertical
     value bar beside it, the `Linear | Perceptual` and `RGB | HSV` segmented rows, four
     number sliders (RGB/Alpha or Hue/Saturation/Value/Alpha), then `Hex` + the eyedropper.
+21. The value bar is Blender's `draw_but_HSV_v`: a NEUTRAL black-to-white ramp that never
+    takes the hue and never repaints as the handle moves, a 1px outline, and a black
+    handle bar of height `max(width * 0.35, 1)` held 2px inside each end, its core filled
+    with the current value, growing a pixel on every side while it is held. Zero sits at
+    the top and one at the bottom (`ymin + v * height`). A control must not colour itself
+    with the value it is editing.
+22. The header row is EVERY element in the widget's upper band except the corner brackets
+    (X, colour chip, chevrons, title, value, check). They all take their y from ONE
+    centre, `HeaderLayout.RowCenterFor(plot top)`, so the row can only move as one and
+    always sits centred in the space between the widget's top edge and the first
+    horizontal line. The corner brackets belong to the card, not the row.
 
 ## Containers
 
