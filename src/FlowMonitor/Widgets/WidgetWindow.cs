@@ -506,8 +506,20 @@ public sealed class WidgetWindow
         int sy = (int)((r.Top + r.Height) * d) + 8;
         var screen = new Native.POINT(sx, sy);
         ClientToScreen(Handle, ref screen);
-        string? picked = ColorPickerWindow.Show(_host, this, screen.X, screen.Y, Config.LineColorFor(Config.Graph));
-        if (picked == null) return;
+        string start = Config.LineColorFor(Config.Graph);
+        // Live preview: every drag change repaints this widget with the new colour
+        // (unsaved). Commit writes the config; cancel puts the original back.
+        string? picked = ColorPickerWindow.Show(_host, this, screen.X, screen.Y, start, live =>
+        {
+            Config.SetLineColor(Config.Graph, live);
+            _host.OnWidgetConfigChanged(this, livePreview: true);
+        });
+        if (picked == null)
+        {
+            Config.SetLineColor(Config.Graph, start);
+            _host.OnWidgetConfigChanged(this, livePreview: true);
+            return;
+        }
         Config.SetLineColor(Config.Graph, picked);
         _host.OnWidgetConfigChanged(this, livePreview: false);
     }

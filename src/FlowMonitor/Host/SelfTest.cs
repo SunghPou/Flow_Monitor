@@ -98,7 +98,7 @@ public static class SelfTest
                         // so paint twice before capturing.
                         for (int f = 0; f < 2; f++)
                             ColorPickerWindow.PaintTo(pick, resources, 1f,
-                                new Hsv(275, 0.62, 0.86), 0.8);
+                                new Hsv(275, 0.62, 0.86));
                         pick.CaptureToBmp(device, System.IO.Path.Combine(captureDir,
                             light ? "31-picker-light.bmp" : "31-picker-dark.bmp"));
                         Log.Info($"captured picker ({(light ? "light" : "dark")} theme)");
@@ -710,34 +710,54 @@ public static class SelfTest
                     "hex parsing takes short, bare and junk input",
                     $"#abc -> {Rgba.FromHex("#abc").ToHex()}, bare -> {Rgba.FromHex("AABBCC").ToHex()}, junk -> {Rgba.FromHex("nonsense").ToHex()}");
 
-                // The ring must run red at 3 o'clock, then magenta, blue, cyan,
-                // green, yellow clockwise — the reference wheel's order.
-                float h3 = ColorPickerLayout.HueFromPoint(
-                    ColorPickerLayout.Center.X + 90f, ColorPickerLayout.Center.Y);
-                float h12 = ColorPickerLayout.HueFromPoint(
-                    ColorPickerLayout.Center.X, ColorPickerLayout.Center.Y - 90f);
-                float h9 = ColorPickerLayout.HueFromPoint(
-                    ColorPickerLayout.Center.X - 90f, ColorPickerLayout.Center.Y);
-                Check(Math.Abs(h3) < 0.01f && Math.Abs(h12 - 90f) < 0.01f && Math.Abs(h9 - 180f) < 0.01f,
-                    "hue ring puts red at 3 o'clock and runs the reference order",
-                    $"3 o'clock {h3:0.0} deg, 12 o'clock {h12:0.0} (yellow-green), 9 o'clock {h9:0.0} (cyan)");
+                // Blender's wheel: hue runs clockwise from red at 12 o'clock
+                // (https://projects.blender.org/blender/blender/raw/main/source/blender/editors/interface/interface_widgets.cc
+                // hsvcircle_vals_from_pos), and the radius is saturation.
+                var c = ColorPickerLayout.Center;
+                double h12 = ColorPickerLayout.HsFromPoint(c.X, c.Y - 90f).H;
+                double h3 = ColorPickerLayout.HsFromPoint(c.X + 90f, c.Y).H;
+                double h6 = ColorPickerLayout.HsFromPoint(c.X, c.Y + 90f).H;
+                Check(Math.Abs(h12) < 0.01 && Math.Abs(h3 - 90) < 0.01 && Math.Abs(h6 - 180) < 0.01,
+                    "wheel puts red at 12 o'clock and runs the reference order",
+                    $"12 o'clock {h12:0.0} deg, 3 o'clock {h3:0.0}, 6 o'clock {h6:0.0}");
 
-                float back = ColorPickerLayout.HueFromPoint(
-                    ColorPickerLayout.PointFromHue(275f).X, ColorPickerLayout.PointFromHue(275f).Y);
-                Check(Math.Abs(back - 275f) < 0.5f, "hue marker and ring are inverses",
-                    $"hue 275 -> {back:0.0} deg");
+                double satOut = ColorPickerLayout.HsFromPoint(c.X + ColorPickerLayout.WheelR + 40f, c.Y).S;
+                double satMid = ColorPickerLayout.HsFromPoint(c.X, c.Y).S;
+                Check(Math.Abs(satOut - 1) < 0.001 && Math.Abs(satMid) < 0.001,
+                    "wheel radius is saturation, clamped at the rim",
+                    $"centre S={satMid:0.00}, beyond the rim S={satOut:0.00}");
 
-                Check(ColorPickerLayout.HitTest(ColorPickerLayout.Center.X, ColorPickerLayout.Center.Y)
-                        == PickerPart.Disc
-                    && ColorPickerLayout.HitTest(ColorPickerLayout.Center.X + 90f, ColorPickerLayout.Center.Y)
-                        == PickerPart.Ring
-                    && ColorPickerLayout.HitTest(ColorPickerLayout.AlphaTrack.Left + 30f,
-                        ColorPickerLayout.AlphaTrack.Top + 8f) == PickerPart.Alpha
+                // Saturation 0 is the wheel's centre, where hue is unrecoverable by
+                // construction, so the round trip starts off-centre; a grey centre proves
+                // the wheel really is achromatic there.
+                float worstH = 0f, worstS = 0f;
+                foreach (float hh in new[] { 0f, 37f, 90f, 145f, 200f, 268f, 310f, 359f })
+                    foreach (float ss in new[] { 0.05f, 0.25f, 0.5f, 0.75f, 1f })
+                    {
+                        var p = ColorPickerLayout.PointFromHs(hh, ss);
+                        var backHs = ColorPickerLayout.HsFromPoint(p.X, p.Y);
+                        double dH = Math.Abs(backHs.H - hh); if (dH > 180) dH = 360 - dH;
+                        worstH = Math.Max(worstH, (float)dH);
+                        worstS = Math.Max(worstS, (float)Math.Abs(backHs.S - ss));
+                    }
+                Check(worstH < 0.6f && worstS < 0.002f, "wheel marker and wheel are inverses",
+                    $"worst hue error {worstH:0.00} deg, worst saturation error {worstS:0.000}");
+
+                float vx = ColorPickerLayout.XFromValue(0.62);
+                Check(Math.Abs((double)ColorPickerLayout.ValueFromX(vx) - 0.62) < 0.005,
+                    "value slider and its handle are inverses",
+                    $"value 0.62 -> x {vx:0.0} -> {ColorPickerLayout.ValueFromX(vx):0.000}");
+
+                Check(ColorPickerLayout.HitTest(c.X, c.Y) == PickerPart.Wheel
+                    && ColorPickerLayout.HitTest(c.X + 90f, c.Y) == PickerPart.Wheel
+                    && ColorPickerLayout.HitTest(c.X + ColorPickerLayout.WheelR + 20f, c.Y) == PickerPart.None
+                    && ColorPickerLayout.HitTest(ColorPickerLayout.ValueTrack.Left + 30f,
+                        ColorPickerLayout.ValueTrack.Top + 8f) == PickerPart.Value
                     && ColorPickerLayout.HitTest(ColorPickerLayout.Eyedropper.Left + 5f,
                         ColorPickerLayout.Eyedropper.Top + 5f) == PickerPart.Eyedropper
                     && ColorPickerLayout.HitTest(4f, 4f) == PickerPart.None,
-                    "hit-test agrees with what the ring, disc, slider and dropper draw",
-                    "centre = disc, ring band = ring, slider = alpha, dropper = eyedropper, corner = none");
+                    "hit-test agrees with what the wheel, slider and dropper draw",
+                    "inside the rim = wheel, outside it = none (click-away commits), slider = value, dropper = eyedropper, corner = none");
 
                 var dark = SystemTheme.CardFor(light: false);
                 var light = SystemTheme.CardFor(light: true);
@@ -746,14 +766,15 @@ public static class SelfTest
                     "picker card fill follows the system theme",
                     $"dark #424242 -> {dark.R * 255:0} ({dark.G * 255:0},{dark.B * 255:0}), light #CCCCCC -> {light.R * 255:0}");
 
-                // The chip lives in the free zone left of the centred group and is
-                // dropped rather than allowed to push the group off centre.
+                // The chip sits between the X badge and the centred group, right-aligned
+                // against the group, and is dropped rather than allowed to move it.
                 var chipEdit = HeaderLayout.Compute(460, titleW: 45, valueW: 110, editing: true);
                 float chipClear = chipEdit.Chip.Width == 0 ? 0
                     : chipEdit.Chip.Left - HeaderLayout.BadgeInkRight(chipEdit.Close);
-                Check(chipEdit.Chip.Width == HeaderLayout.ChipDia && chipClear >= HeaderLayout.GapChrome,
-                    "colour chip sits in the header's free zone, clear of the X",
-                    $"chip [{chipEdit.Chip.Left:0.0}..{chipEdit.Chip.Right:0.0}] {chipClear:0.0}px after the X ink");
+                Check(chipEdit.Chip.Width == HeaderLayout.ChipDia && chipClear >= HeaderLayout.GapChrome
+                    && chipEdit.Chip.Right <= chipEdit.Title.Left - HeaderLayout.ChevBox / 2f,
+                    "colour chip sits between the X and the centred group",
+                    $"chip [{chipEdit.Chip.Left:0.0}..{chipEdit.Chip.Right:0.0}], {chipClear:0.0}px after the X ink, group starts {chipEdit.Title.Left:0.0}");
                 var chipNarrow = HeaderLayout.Compute(150, titleW: 45, valueW: 110, editing: true);
                 Check(chipNarrow.Chip.Width == 0, "colour chip is dropped on a card too narrow to hold it",
                     "a 150px card has no free zone, so no chip is offered");
@@ -1212,6 +1233,29 @@ public static class SelfTest
                                     cw.Surface.CaptureToBmp(fhost.Device,
                                         System.IO.Path.Combine(captureDir, $"30-card-{kind}-edit.bmp"));
                                     Log.Info($"captured card {kind} (locked + edit)");
+
+                                    // A picked colour must reach the curve, not just the chip:
+                                    // the same path the picker commits through.
+                                    if (kind == GraphKind.Gpu)
+                                    {
+                                        const string Pick = "#FF3B30";
+                                        cw.Config.SetLineColor(kind, Pick);
+                                        fhost.OnWidgetConfigChanged(cw, livePreview: true);
+                                        for (int f = 0; f < 2; f++)
+                                        {
+                                            cw.RequestRedraw();
+                                            cw.RenderFrame(TestNow + 0.8 + f / 60.0, 1f / 60f);
+                                            cw.CommitComposition();
+                                        }
+                                        var px = cw.Surface.CaptureToPixels(fhost.Device);
+                                        int hit = CountPixels(px, cw.Surface.Width, cw.Surface.Height,
+                                            x => true, y => y > 50,
+                                            (r, g, b) => r > 200 && g > 30 && g < 90 && b < 70);
+                                        Check(hit > 40, "a picked line colour reaches the curve",
+                                            $"{hit} px of {Pick} in the plot (0 means the chip changed but the graph did not)");
+                                        cw.Surface.CaptureToBmp(fhost.Device,
+                                            System.IO.Path.Combine(captureDir, "30-card-Gpu-recolor.bmp"));
+                                    }
                                 }
                                 catch (Exception ex) { Log.Write("ERROR", $"card {kind}: {ex}"); }
                                 finally { try { cw?.Destroy(); } catch { } }

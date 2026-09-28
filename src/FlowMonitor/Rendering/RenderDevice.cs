@@ -19,6 +19,12 @@ public sealed class RenderDevice : IDisposable
     public ID3D11Device D3DDevice { get; }
 
     /// <summary>
+    /// Serialises every user of this device: the render thread frames and the
+    /// modal popup (colour picker) that paints from the UI thread.
+    /// </summary>
+    public object GpuLock { get; } = new();
+
+    /// <summary>
     /// Why the device went away, or S_OK if healthy. Device loss is process-wide
     /// (single shared D3D/D2D/DComp device), so any failure here is not widget-local.
     /// </summary>

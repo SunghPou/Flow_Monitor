@@ -109,14 +109,16 @@ public readonly record struct HeaderLayout(RectF Value, RectF Title, RectF Prev,
             prev = ChevHitBox(tx - ChevGap - WidgetPainter.ChevronGlyphHalf, leftReserve, valueLeft);
             next = ChevHitBox(tx + titleW2 + ChevGap + WidgetPainter.ChevronGlyphHalf, leftReserve, valueLeft);
         }
-        // The colour chip opens the picker. It sits in the free zone just right of the X,
-        // so the header reads as one left cluster and the chip never drifts with card width.
+        // The colour chip opens the picker. It is pushed against the centred group
+        // (GapChrome clear of its left ink edge) so it sits in the gap between the
+        // X and the metric arrows; it is dropped when that gap cannot hold it.
         RectF chip = RectF.Empty;
         if (editing)
         {
             float groupInkLeft = tx - inkPad;
-            if (leftReserve + ChipDia + GapText <= groupInkLeft)
-                chip = new RectF(leftReserve, RowCenter - ChipDia / 2f, ChipDia, ChipDia);
+            float chipRight = groupInkLeft - GapChrome;
+            if (leftReserve + ChipDia + GapText <= chipRight)
+                chip = new RectF(chipRight - ChipDia, RowCenter - ChipDia / 2f, ChipDia, ChipDia);
         }
         return new HeaderLayout(value, title, prev, next, close, check, chip, valueMax);
     }

@@ -15,9 +15,10 @@ using SizeI = Vortice.Mathematics.SizeI;
 namespace FlowMonitor.Host;
 
 /// <summary>
-/// Modal colour picker: hue ring, SV disc, alpha track and read-only hex/R/G/B
-/// fields on a card that follows the system theme. Top-level (WS_EX_TOOLWINDOW)
-/// and reuses WidgetSurface from the shared device.
+/// Modal colour picker shaped after Blender's colour picker: one full-bleed wheel
+/// where the angle is hue and the radius is saturation, a value slider under it, and
+/// read-only hex/R/G/B fields on a card that follows the system theme. Top-level
+/// (WS_EX_TOOLWINDOW) and reuses WidgetSurface from the shared device.
 /// THREADING: Show runs on the UI thread with its own modal loop; blocking, and
 /// owns the GPU via SetMenuOpen while up.
 /// </summary>
@@ -27,19 +28,22 @@ internal static class ColorPickerWindow
 
     internal delegate IntPtr PickerWndProc(IntPtr hwnd, uint msg, IntPtr wParam, IntPtr lParam);
 
-    // Ring and disc have no conic/radial gradient in D2D, so they are CPU bitmaps.
-    static ID2D1Bitmap1? _ringBmp;
-    static ID2D1Bitmap1? _discBmp;
-    static int _discHue = -1;
-    static ID2D1BitmapBrush? _checker;
+    // D2D has no polar gradient, so the wheel is a CPU bitmap.
+    static ID2D1Bitmap1? _wheelBmp;
+    static int _wheelPx;
+    static int _wheelValue = -1;
     static Hsv _hsv;
-    static double _alpha = 1.0;
     static PickerPart _drag = PickerPart.None;
     static bool _cancelled;
     static bool _up;
 
+    /// <summary>Wheel notch size for the value component (Blender's colorpicker_wheel_cb).</summary>
+    const double WheelStep = 0.05;
+
     static WidgetSurface? _surface;
     static IRenderHost? _host;
+    /// <summary>Live-preview sink: called with the current colour on every change.</summary>
+    static Action<string>? _onChanged;
     static ResourceCache? _res;
     static WidgetWindow? _owner;
     static IntPtr _hwnd;
@@ -74,6 +78,10 @@ internal static class ColorPickerWindow
                     _drag = PickerPart.None;
                     return new IntPtr(0);
 
+                case Native.WM_MOUSEWHEEL:
+                    Wheel(wParam);
+                    return new IntPtr(0);
+
                 case Native.WM_KEYDOWN:
                     if ((wParam.ToInt64() & 0xFFFF) == Native.VK_ESCAPE) { _cancelled = true; Close(); return new IntPtr(0); }
                     break;
@@ -101,7 +109,8 @@ internal static class ColorPickerWindow
     /// Shows the picker near (x, y) in screen coordinates seeded with
     /// <paramref name="startHex"/>. Returns the chosen #RRGGBB, or null if cancelled.
     /// </summary>
-    internal static string? Show(IRenderHost host, WidgetWindow widget, int x, int y, string startHex)
+    internal static string? Show(IRenderHost host, WidgetWindow widget, int x, int y, string startHex,
+        Action<string>? onChanged = null)
     {
         SystemTheme.Refresh();
         _host = host;
@@ -109,28 +118,30 @@ internal static class ColorPickerWindow
         _up = false;
         _cancelled = false;
         _drag = PickerPart.None;
-        var start = Rgba.FromHex(startHex);
-        _hsv = start.ToHsv();
-        _alpha = start.A / 255.0;
+        _onChanged = onChanged;
+        _hsv = Rgba.FromHex(startHex).ToHsv();
 
         host.SetMenuOpen(true);
         try { Run(host, widget, x, y); }
-        finally { host.SetMenuOpen(false); }
+        finally { host.SetMenuOpen(false); _onChanged = null; }
 
         if (_cancelled || !_up) return null;
         return Current().ToHex();
     }
 
+    /// <summary>Live preview: the owner widget repaints with this colour, unsaved.</summary>
+    static void NotifyChanged() => _onChanged?.Invoke(Current().ToHex());
+
     static Rgba Current()
     {
         var (r, g, b) = _hsv.ToRgb();
-        return new Rgba(r, g, b, (byte)Math.Clamp(Math.Round(_alpha * 255.0), 0.0, 255.0));
+        return new Rgba(r, g, b);
     }
 
-    /// <summary>Fully opaque current hue/saturation/value, used to tint the alpha track.</summary>
+    /// <summary>Fully saturated current hue at the current value, used to tint the value track.</summary>
     static Rgba Pure()
     {
-        var (r, g, b) = _hsv.ToRgb();
+        var (r, g, b) = new Hsv(_hsv.H, 1.0, _hsv.V).ToRgb();
         return new Rgba(r, g, b);
     }
 
@@ -232,14 +243,38 @@ internal static class ColorPickerWindow
     static void Apply(IntPtr lParam)
     {
         var (x, y) = ToLogical(lParam);
-        if (_drag == PickerPart.Ring) _hsv = new Hsv(Picker.HueFromPoint(x, y), _hsv.S, _hsv.V);
-        else if (_drag == PickerPart.Disc)
+        if (_drag == PickerPart.Wheel)
         {
-            var (s, v) = Picker.SvFromPoint(x, y);
-            _hsv = new Hsv(_hsv.H, s, v);
+            var (h, s) = Picker.HsFromPoint(x, y);
+            _hsv = new Hsv(h, s, _hsv.V);
         }
-        else if (_drag == PickerPart.Alpha) _alpha = Picker.AlphaFromX(x);
+        else if (_drag == PickerPart.Value)
+        {
+            _hsv = new Hsv(_hsv.H, _hsv.S, Picker.ValueFromX(x));
+        }
         _hsv = _hsv.Normalized();
+        NotifyChanged();
+    }
+
+    /// <summary>
+    /// Wheel over the card nudges the value component, and a wheel turn outside it
+    /// commits and closes, both as Blender's colorpicker_wheel_cb does.
+    /// </summary>
+    static void Wheel(IntPtr wParam)
+    {
+        int delta = (short)(wParam.ToInt64() >> 16);
+        int px = (short)(wParam.ToInt64() & 0xFFFF);
+        int py = (short)((wParam.ToInt64() >> 16) & 0xFFFF);
+
+        if (px < 0 || py < 0 || px >= Picker.CardW * _scale || py >= Picker.CardH * _scale)
+        {
+            Close();
+            return;
+        }
+        double step = delta >= 0 ? WheelStep : -WheelStep;
+        _hsv = new Hsv(_hsv.H, _hsv.S, _hsv.V + step).Normalized();
+        NotifyChanged();
+        Paint();
     }
 
     /// <summary>Hides the card, samples the pixel the user clicks, brings the card back.</summary>
@@ -252,7 +287,7 @@ internal static class ColorPickerWindow
         if (picked is Rgba rgb)
         {
             _hsv = rgb.ToHsv();
-            _alpha = 1.0;
+            NotifyChanged();
         }
         Native.ShowWindow(_hwnd, 5 /* SW_SHOW */);
         Native.SetForegroundWindow(_hwnd);
@@ -266,13 +301,12 @@ internal static class ColorPickerWindow
     /// Offscreen render for the selftest sheet: the live path is <see cref="Paint"/>,
     /// which reads the same statics this sets.
     /// </summary>
-    internal static void PaintTo(WidgetSurface surface, ResourceCache res, float scale, Hsv hsv, double alpha)
+    internal static void PaintTo(WidgetSurface surface, ResourceCache res, float scale, Hsv hsv)
     {
         _surface = surface;
         _res = res;
         _scale = scale;
         _hsv = hsv;
-        _alpha = alpha;
         Paint();
     }
 
@@ -281,6 +315,14 @@ internal static class ColorPickerWindow
         var surface = _surface;
         var res = _res ?? _host?.Resources;
         if (surface == null || res == null) return;
+        // The render thread draws the widgets on the same device; one at a time.
+        var gpu = _host?.Device.GpuLock;
+        if (gpu is null) { PaintBody(surface, res); return; }
+        lock (gpu) PaintBody(surface, res);
+    }
+
+    static void PaintBody(WidgetSurface surface, ResourceCache res)
+    {
         float s = _scale;
 
         surface.BeginDraw(s * 96f);
@@ -295,66 +337,55 @@ internal static class ColorPickerWindow
             res.Format("Segoe UI Variable Display", 28f, Vortice.DirectWrite.FontWeight.Normal),
             VR(S(Picker.Title, s)), res.Brush(SystemTheme.Ink));
 
-        EnsureBitmaps(dc);
-
-        // The disc is smaller than the ring hole, so a white gap separates them.
-        if (_discBmp != null)
-            dc.DrawBitmap(_discBmp, (RectangleF?)Square(Picker.Center, Picker.DiscR, s), 1f,
-                BitmapInterpolationMode.Linear, (RectangleF?)null);
-        if (_ringBmp != null)
-            dc.DrawBitmap(_ringBmp, (RectangleF?)Square(Picker.Center, Picker.RingOuter, s), 1f,
+        EnsureWheel(dc);
+        if (_wheelBmp != null)
+            dc.DrawBitmap(_wheelBmp, (RectangleF?)Square(Picker.Center, Picker.WheelR, s), 1f,
                 BitmapInterpolationMode.Linear, (RectangleF?)null);
 
-        var pure = Pure();
-        DrawMarkers(dc, res, s, pure);
-        DrawAlpha(dc, res, s, pure);
+        DrawWheelMarker(dc, res, s);
+        DrawValue(dc, res, s);
         DrawFields(dc, res, s);
         DrawEyedropper(dc, res, s);
 
         surface.EndDrawAndPresent();
     }
 
-    static void DrawMarkers(ID2D1DeviceContext dc, ResourceCache res, float s, Rgba pure)
+    static void DrawWheelMarker(ID2D1DeviceContext dc, ResourceCache res, float s)
     {
-        var hue = Picker.PointFromHue((float)_hsv.H);
-        var sv = Picker.PointFromSv(_hsv.S, _hsv.V);
-        var white = res.Brush(new Color4(1f, 1f, 1f, 1f));
-
-        // Hue marker: a filled disc of the pure colour, ringed in white, riding the band.
-        float rr = Picker.RingMarkerR * s;
-        dc.FillEllipse(new Ellipse(new V2(hue.X * s, hue.Y * s), rr, rr), res.Brush(pure.ToColor4()));
-        Ring(dc, (hue.X - Picker.RingMarkerR) * s, (hue.Y - Picker.RingMarkerR) * s,
-            rr * 2f, white, 2.2f * s);
-        // SV marker: a small hollow white ring.
-        Ring(dc, (sv.X - Picker.MarkerR) * s, (sv.Y - Picker.MarkerR) * s,
-            Picker.MarkerR * 2 * s, white, Picker.MarkerStroke * s);
+        var at = Picker.PointFromHs(_hsv.H, _hsv.S);
+        float d = Picker.MarkerR * 2f * s;
+        float x = (at.X - Picker.MarkerR) * s, y = (at.Y - Picker.MarkerR) * s;
+        dc.FillEllipse(new Ellipse(new V2(at.X * s, at.Y * s), Picker.MarkerR * s, Picker.MarkerR * s),
+            res.Brush(Current().ToColor4()));
+        // Dark outline under a white one, so the ring reads on any wheel colour.
+        Ring(dc, x, y, d, res.Brush(new Color4(0f, 0f, 0f, 0.45f)), 3f * s);
+        Ring(dc, x, y, d, res.Brush(new Color4(1f, 1f, 1f, 1f)), Picker.MarkerStroke * s);
     }
 
     static void Ring(ID2D1DeviceContext dc, float x, float y, float d, ID2D1Brush brush, float width)
         => dc.DrawEllipse(new Ellipse(new V2(x + d / 2f, y + d / 2f), d / 2f, d / 2f), brush, width);
 
-    static void DrawAlpha(ID2D1DeviceContext dc, ResourceCache res, float s, Rgba pure)
+    static void DrawValue(ID2D1DeviceContext dc, ResourceCache res, float s)
     {
-        var track = S(Picker.AlphaTrack, s);
+        var track = S(Picker.ValueTrack, s);
+        var pure = Pure();
 
-        if (_checker != null) dc.FillRectangle(track, _checker);
-        else dc.FillRectangle(track, res.Brush(new Color4(1f, 1f, 1f, 0.2f)));
-
-        // Transparent on the left, the colour on the right: the checkerboard reads through.
+        // Black on the left, the hue at the current value on the right.
         var props = new LinearGradientBrushProperties(
             new V2(track.Left, 0f), new V2(track.Right, 0f));
         using var stops = dc.CreateGradientStopCollection(
         [
-            new GradientStop(0f, new Color4(pure.R / 255f, pure.G / 255f, pure.B / 255f, 0f)),
-            new GradientStop(1f, new Color4(pure.R / 255f, pure.G / 255f, pure.B / 255f, 1f)),
+            new GradientStop(0f, new Color4(0f, 0f, 0f, 1f)),
+            new GradientStop(1f, pure.ToColor4()),
         ], Gamma.Linear, ExtendMode.Clamp);
         using var grad = dc.CreateLinearGradientBrush(props, stops);
-        dc.FillRectangle(track, grad);
+        dc.FillRoundedRectangle(new RoundedRectangle(track, track.Height / 2f, track.Height / 2f), grad);
 
-        float hx = Picker.XFromAlpha(_alpha) * s;
+        float hx = Picker.XFromValue(_hsv.V) * s;
         float hy = track.Top + track.Height / 2f;
+        float d = Picker.MarkerR * 2 * s;
         var white = res.Brush(new Color4(1f, 1f, 1f, 1f));
-        Ring(dc, hx - Picker.MarkerR * s, hy - Picker.MarkerR * s, Picker.MarkerR * 2 * s, white, Picker.MarkerStroke * s);
+        Ring(dc, hx - Picker.MarkerR * s, hy - Picker.MarkerR * s, d, white, Picker.MarkerStroke * s);
     }
 
     static void DrawFields(ID2D1DeviceContext dc, ResourceCache res, float s)
@@ -405,103 +436,47 @@ internal static class ColorPickerWindow
         return new RectangleF((center.X - half) * s, (center.Y - half) * s, d, d);
     }
 
-    // ------------------------------------------------------------------ bitmaps
+    // ------------------------------------------------------------------ bitmap
 
-    // Bitmaps are generated at device pixels and drawn 1:1 with DrawBitmap: a bitmap
+    // The wheel is generated at device pixels and drawn 1:1 with DrawBitmap: a bitmap
     // brush re-maps the source through DPI and produced smeared bands here.
-    static void EnsureBitmaps(ID2D1DeviceContext dc)
+    static void EnsureWheel(ID2D1DeviceContext dc)
     {
-        int ringPx = (int)MathF.Ceiling(Picker.RingOuter * 2f * _scale);
-        if (_ringBmp == null || _ringPx != ringPx)
+        int n = (int)MathF.Ceiling(Picker.WheelR * 2f * _scale);
+        // The wheel bakes value in, so it is rebuilt whenever value leaves its bucket.
+        int valueBucket = (int)Math.Round(_hsv.V * 40.0);
+        if (_wheelBmp == null || _wheelPx != n || _wheelValue != valueBucket)
         {
-            _ringBmp?.Dispose();
-            _ringBmp = MakeRing(dc, ringPx);
-            _ringPx = ringPx;
-        }
-
-        // The disc bakes the hue in, so it is rebuilt whenever the hue leaves its bucket.
-        int discPx = (int)MathF.Ceiling(Picker.DiscR * 2f * _scale);
-        int hueBucket = (int)Math.Round(_hsv.H / 2.0);
-        if (_discBmp == null || _discHue != hueBucket || _discPx != discPx)
-        {
-            _discBmp?.Dispose();
-            _discBmp = MakeDisc(dc, discPx);
-            _discHue = hueBucket;
-            _discPx = discPx;
-        }
-
-        if (_checker == null)
-        {
-            _checker = dc.CreateBitmapBrush(MakeChecker(dc), new BitmapBrushProperties
-            {
-                ExtendModeX = ExtendMode.Wrap,
-                ExtendModeY = ExtendMode.Wrap,
-                InterpolationMode = BitmapInterpolationMode.NearestNeighbor,
-            });
+            _wheelBmp?.Dispose();
+            _wheelBmp = MakeWheel(dc, n);
+            _wheelPx = n;
+            _wheelValue = valueBucket;
         }
     }
-    static int _ringPx, _discPx;
 
-    static ID2D1Bitmap1? MakeRing(ID2D1DeviceContext dc, int n)
-    {
-        float outer = Picker.RingOuter * _scale, inner = Picker.RingInner * _scale;
-        var buf = new byte[n * n * 4];
-        for (int y = 0; y < n; y++)
-            for (int x = 0; x < n; x++)
-            {
-                float dx = x + 0.5f - n / 2f, dy = y + 0.5f - n / 2f;
-                float r = MathF.Sqrt(dx * dx + dy * dy);
-                if (r < inner || r > outer) continue;
-                float deg = MathF.Atan2(dy, dx) * 180f / MathF.PI;
-                // Same mapping as ColorPickerLayout.HueFromPoint: red at 3 o'clock.
-                float hue = ((-deg) % 360f + 360f) % 360f;
-                var (cr, cg, cb) = new Hsv(hue, 1, 1).ToRgb();
-                Put(buf, (y * n + x) * 4, cr, cg, cb);
-            }
-        return Upload(dc, n, n, buf);
-    }
-
-    static ID2D1Bitmap1? MakeDisc(ID2D1DeviceContext dc, int n)
+    static ID2D1Bitmap1? MakeWheel(ID2D1DeviceContext dc, int n)
     {
         float rMax = n / 2f;
         var buf = new byte[n * n * 4];
-        var (pr, pg, pb) = new Hsv(_hsv.H, 1, 1).ToRgb();
+        double v = _hsv.V;
         for (int y = 0; y < n; y++)
             for (int x = 0; x < n; x++)
             {
                 float dx = x + 0.5f - rMax, dy = y + 0.5f - rMax;
                 float r = MathF.Sqrt(dx * dx + dy * dy);
-                if (r > rMax) continue;
-                double s = Math.Clamp(r / rMax, 0.0, 1.0);
-                // Value falls from the top down, matching PointFromSv (v = 1 at the top).
-                double v = Math.Clamp(1.0 - (y + 0.5) / n, 0.0, 1.0);
-                // White centre, hue at the rim, black at the bottom: (hue*(1-s) + white*s) * v.
-                byte cr = (byte)Math.Round((pr * (1 - s) + 255 * s) * v);
-                byte cg = (byte)Math.Round((pg * (1 - s) + 255 * s) * v);
-                byte cb = (byte)Math.Round((pb * (1 - s) + 255 * s) * v);
+                if (r > rMax) continue;                       // clear outside the rim
+                // Same mapping as ColorPickerLayout.HsFromPoint: hue 0 at 12 o'clock, clockwise.
+                double hue = Math.Atan2(dx, -dy) / (2.0 * Math.PI) * 360.0;
+                hue = (hue % 360.0 + 360.0) % 360.0;
+                var (cr, cg, cb) = new Hsv(hue, Math.Clamp(r / rMax, 0.0, 1.0), v).ToRgb();
                 Put(buf, (y * n + x) * 4, cr, cg, cb);
-            }
-        return Upload(dc, n, n, buf);
-    }
-
-    static ID2D1Bitmap1? MakeChecker(ID2D1DeviceContext dc)
-    {
-        const int cell = 8;
-        int n = cell * 2;
-        var buf = new byte[n * n * 4];
-        for (int y = 0; y < n; y++)
-            for (int x = 0; x < n; x++)
-            {
-                bool light = ((x / cell) + (y / cell)) % 2 == 0;
-                byte v = light ? (byte)0xCC : (byte)0xFF;
-                Put(buf, (y * n + x) * 4, v, v, v);
             }
         return Upload(dc, n, n, buf);
     }
 
     static void Put(byte[] buf, int at, byte r, byte g, byte b)
     {
-        // B8G8R8A8_UNorm, premultiplied; these bitmaps are opaque wherever they are not clear.
+        // B8G8R8A8_UNorm, premultiplied; the wheel is opaque wherever it is not clear.
         buf[at] = b; buf[at + 1] = g; buf[at + 2] = r; buf[at + 3] = 255;
     }
 

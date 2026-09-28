@@ -599,14 +599,6 @@ public sealed class DesktopHost : IRenderHost, IDisposable
                 // Teardown at the top of the loop, where no frame body is in flight.
                 DrainDestroyQueue();
 
-                // While the modal menu is open it owns the GPU; skip frames so no
-                // RenderFrame / Present / Commit overlaps a menu paint.
-                if (_menuOpen)
-                {
-                    Thread.Sleep(8);
-                    continue;
-                }
-
                 FlushPendingGeometry();
 
                 WidgetWindow[] snapshot;
@@ -618,19 +610,25 @@ public sealed class DesktopHost : IRenderHost, IDisposable
                 // if the other widgets still render fine; multi-widget faults are device-wide.
                 var frameFaults = new List<WidgetWindow>();
                 string? frameFaultMessage = null;
-                foreach (var w in snapshot)
+                // One GPU at a time: this thread and an open popup (the colour picker) share the
+                // device, and DComp Commit is not thread-safe. The popup is the only other
+                // GPU user, so widgets keep rendering while a picker is open.
+                lock (Device.GpuLock)
                 {
-                    if (!w.IsVisible) continue;
-                    try
+                    foreach (var w in snapshot)
                     {
-                        if (w.RenderFrame(_telemetry.Time, dt)) any = true;
-                        _renderFaults.NoteSuccess(w);
-                    }
-                    catch (Exception ex)
-                    {
-                        // One bad widget must not stop the others; consecutive faults retire it.
-                        frameFaults.Add(w);
-                        frameFaultMessage ??= ex.Message;
+                        if (!w.IsVisible) continue;
+                        try
+                        {
+                            if (w.RenderFrame(_telemetry.Time, dt)) any = true;
+                            _renderFaults.NoteSuccess(w);
+                        }
+                        catch (Exception ex)
+                        {
+                            // One bad widget must not stop the others; consecutive faults retire it.
+                            frameFaults.Add(w);
+                            frameFaultMessage ??= ex.Message;
+                        }
                     }
                 }
 
@@ -670,8 +668,11 @@ public sealed class DesktopHost : IRenderHost, IDisposable
 
                 if (any)
                 {
-                    foreach (var w in snapshot) w.ApplyOpacity();
-                    Device.CompositionDevice.Commit();
+                    lock (Device.GpuLock)
+                    {
+                        foreach (var w in snapshot) w.ApplyOpacity();
+                        Device.CompositionDevice.Commit();
+                    }
                 }
 
                 if (doomed is not null)
@@ -829,6 +830,10 @@ public sealed class DesktopHost : IRenderHost, IDisposable
         }
 
         if (!livePreview) WidgetStore.Save(cfg);
+
+        // The next frame must repaint: a colour or geometry change is invisible
+        // until the widget is asked for it.
+        widget.RequestRedraw();
     }
 
     public ChartModel BuildChart(WidgetConfig cfg, double now)
@@ -855,7 +860,8 @@ public sealed class DesktopHost : IRenderHost, IDisposable
 
     ChartModel BuildChartCore(WidgetConfig cfg, double now)
     {
-        var accent = ParseColor(cfg.AccentHex, new Color4(0.298f, 0.761f, 1f, 1f));
+        // The card's own line colour wins; AccentHex is the fallback for cards without one.
+        var accent = ParseColor(cfg.LineColorFor(cfg.Graph), ParseColor(cfg.AccentHex, new Color4(0.298f, 0.761f, 1f, 1f)));
 
         switch (cfg.Graph)
         {
@@ -1236,7 +1242,9 @@ public sealed class DesktopHost : IRenderHost, IDisposable
             if (h.Length == 6) h += "FF";
             if (h.Length != 8) return fallback;
             uint v = uint.Parse(h, NumberStyles.HexNumber, CultureInfo.InvariantCulture);
-            return new Color4(((v >> 16) & 0xFF) / 255f, ((v >> 8) & 0xFF) / 255f, (v & 0xFF) / 255f, ((v >> 24) & 0xFF) / 255f);
+            // #RRGGBB, with #RRGGBBAA when an alpha is written: the same order Rgba emits.
+            return new Color4(((v >> 24) & 0xFF) / 255f, ((v >> 16) & 0xFF) / 255f,
+                              ((v >> 8) & 0xFF) / 255f, (v & 0xFF) / 255f);
         }
         catch { return fallback; }
     }
