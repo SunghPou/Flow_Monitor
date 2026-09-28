@@ -157,6 +157,12 @@ internal static class ColorPickerWindow
         _cancelled = false;
         _picking = false;
         _drag = PickerPart.None;
+        // The coalescer's armed flag is per-window: a session that ended with a pending
+        // change would leave it set, and every later NotifyChanged would return early
+        // without arming a timer, so the live preview would never reach the widget again.
+        _timerOn = false;
+        _dirty = false;
+        _pushDirty = false;
         _onChanged = onChanged;
         // The one place the live path gets its resource cache: Paint reads _res and
         // nothing else, so the selftest seam and the live window cannot drift.
