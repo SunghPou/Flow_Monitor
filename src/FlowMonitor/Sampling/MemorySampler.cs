@@ -55,9 +55,13 @@ public sealed class MemorySampler
         CommitLimit = telemetry.NewSeries();
     }
 
+    [System.Runtime.InteropServices.DllImport("psapi.dll", SetLastError = true)]
+    static extern bool GetPerformanceInfo(out PERFORMANCE_INFORMATION pi, uint cbSize);
+
     public void Update(double now)
     {
-        if (!PsApi.GetPerformanceInfo(out var pi)) return;
+        var size = (uint)System.Runtime.InteropServices.Marshal.SizeOf<PERFORMANCE_INFORMATION>();
+        if (!GetPerformanceInfo(out var pi, size)) return;
 
         // Every count field arrives in pages; all are scaled by the page size.
         // Available includes the standby cache, so the plotted Available is free
@@ -86,15 +90,3 @@ public sealed class MemorySampler
     }
 }
 
-static class PsApi
-{
-    [DllImport("psapi.dll", SetLastError = true)]
-    static extern bool GetPerformanceInfo(out PERFORMANCE_INFORMATION cb, uint cbSize);
-
-    public static bool GetPerformanceInfo(out PERFORMANCE_INFORMATION info)
-    {
-        var tmp = default(PERFORMANCE_INFORMATION);
-        tmp.cb = (uint)Marshal.SizeOf<PERFORMANCE_INFORMATION>();
-        return GetPerformanceInfo(out info, tmp.cb);
-    }
-}
