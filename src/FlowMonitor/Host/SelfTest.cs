@@ -839,6 +839,11 @@ public static class SelfTest
                     $"opaque={Interop.EyedropperCursor.OpaquePixels} white={Interop.EyedropperCursor.WhitePixels} dark={Interop.EyedropperCursor.DarkPixels}");
                 if (captureDir.Length > 0)
                     Interop.EyedropperCursor.SavePreview(System.IO.Path.Combine(captureDir, "31-cursor-preview.png"));
+                // The pipette must be readable on any desktop: opaque ink needs a
+                // white core and a near-black outline, or it disappears on one of them.
+                Check(Interop.EyedropperCursor.Darkest <= 24 && Interop.EyedropperCursor.Brightest >= 245,
+                    "pipette ink spans near-black outline to white core",
+                    $"darkest={Interop.EyedropperCursor.Darkest} brightest={Interop.EyedropperCursor.Brightest}");
                 Check(Interop.EyedropperCursor.HotX >= 0 && Interop.EyedropperCursor.HotX < 32
                         && Interop.EyedropperCursor.HotY >= 0 && Interop.EyedropperCursor.HotY < 32,
                     "eyedropper hot spot sits on the rendered tip",

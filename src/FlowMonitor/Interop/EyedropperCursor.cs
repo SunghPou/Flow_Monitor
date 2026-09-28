@@ -178,6 +178,7 @@ public static class EyedropperCursor
         for (int i = 0; i < Size * maskStride; i++) ((byte*)maskBits)[i] = 0xFF;
         Marshal.Copy(px, 0, colorBits, px.Length);
         int opaque = 0, white = 0, dark = 0, best = int.MaxValue, hx = 11, hy = 22;
+        int lo = 255, hi = 0;
         fixed (byte* p = px)
         {
             for (int y = 0; y < Size; y++)
@@ -191,6 +192,8 @@ public static class EyedropperCursor
                     }
                     ((byte*)maskBits)[y * maskStride + (x >> 3)] &= (byte)~(0x80 >> (x & 7));
                     opaque++;
+                    lo = Math.Min(lo, Math.Min(c[0], Math.Min(c[1], c[2])));
+                    hi = Math.Max(hi, Math.Max(c[0], Math.Max(c[1], c[2])));
                     if (c[0] > 200 && c[1] > 200 && c[2] > 200) white++;
                     else if (c[0] < 128 && c[1] < 128 && c[2] < 128) dark++;
                     int tip = x - y;
@@ -200,6 +203,8 @@ public static class EyedropperCursor
         OpaquePixels = opaque;
         WhitePixels = white;
         DarkPixels = dark;
+        Darkest = lo;
+        Brightest = hi;
         HotX = hx;
         HotY = hy;
     }
@@ -210,9 +215,13 @@ public static class EyedropperCursor
     // matches the card icon (26px box * 0.56 fill ~= 14.6px).
     const float ArtC = 16f, ArtSide = 16f;
 
+    // Same box the card uses: the art's own bounding box spans X 195.146..208.990 and
+    // Y 598.5..613.05, so keeping the y scale on the x scale (1:1) makes the pipette
+    // as tall as it is wide instead of stretched. The card's GlyphGeometry.Dropper
+    // stretches it the same way, which is why only the cursor needed this.
     static PointF P(float x, float y) => new(
         ArtC + ((x - 195.146f) / (208.990f - 195.146f) - 0.5f) * ArtSide,
-        ArtC + ((y - 599.000f) / (612.894f - 599.000f) - 0.5f) * ArtSide);
+        ArtC + ((y - 605.775f) / (208.990f - 195.146f) - 0.5f) * ArtSide);
 
     /// <summary>
     /// The same Blender eyedropper walk the card paints (Widgets.GlyphGeometry.Dropper),
@@ -370,6 +379,11 @@ public static class EyedropperCursor
             return null;
         }
     }
+
+    /// <summary>Darkest reachable pixel of the pipette, for the self-test.</summary>
+    internal static int Darkest { get; private set; } = 255;
+    /// <summary>Brightest reachable pixel of the pipette, for the self-test.</summary>
+    internal static int Brightest { get; private set; }
 
     /// <summary>8x preview on a checkerboard, so --capture shows the art as seen.</summary>
     internal static void SavePreview(string path)
