@@ -30,11 +30,19 @@ public static class EyedropperCursor
 
     // ------------------------------------------------------------------ shape
 
-    // Blender's icon raster, so the pointer and the painted field icon match.
-    static bool ShapeAt(int x, int y) => BlenderDropper.Lit(x, y);
+    // The system cursor canvas stays 32x32; the art is drawn at half size centered,
+    // so the on-screen ink matches the card icon (26px box * 0.56 fill ~= 14.6px).
+    const int ArtOff = 8;
+    static bool ShapeAt(int x, int y)
+    {
+        int sx = (x - ArtOff) * 2, sy = (y - ArtOff) * 2;
+        return sx >= 0 && sy >= 0 && sx + 1 < BlenderDropper.Size && sy + 1 < BlenderDropper.Size
+            && (BlenderDropper.Lit(sx, sy) || BlenderDropper.Lit(sx + 1, sy)
+                || BlenderDropper.Lit(sx, sy + 1) || BlenderDropper.Lit(sx + 1, sy + 1));
+    }
 
-    static int HotX => BlenderDropper.HotX;
-    static int HotY => BlenderDropper.HotY;
+    static int HotX => ArtOff + BlenderDropper.HotX / 2;
+    static int HotY => ArtOff + BlenderDropper.HotY / 2;
 
     // ------------------------------------------------------------------ build
 
