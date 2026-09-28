@@ -77,6 +77,25 @@ public static class GlyphGeometry
         }
     }
 
+    /// <summary>
+    /// Appends the shorter arc of radius r around c, from direction a to direction b.
+    /// This is the round join between two bars, so the corner is part of the contour.
+    /// </summary>
+    static void Sweep(List<V2> pts, V2 c, V2 a, V2 b, float r, int seg = 10)
+    {
+        V2 ua = V2.Normalize(a), ub = V2.Normalize(b);
+        double from = Math.Atan2(ua.Y, ua.X);
+        double to = Math.Atan2(ub.Y, ub.X);
+        double sweep = to - from;
+        while (sweep > Math.PI) sweep -= 2 * Math.PI;
+        while (sweep < -Math.PI) sweep += 2 * Math.PI;
+        for (int i = 0; i <= seg; i++)
+        {
+            double th = from + sweep * i / seg;
+            pts.Add(new V2(c.X + (float)(r * Math.Cos(th)), c.Y + (float)(r * Math.Sin(th))));
+        }
+    }
+
     /// <summary>A filled disc of radius r (a round join, a bulb, a dot).</summary>
     public static void Disc(V2 c, float r, int seg = 20)
     {
@@ -134,8 +153,9 @@ public static class GlyphGeometry
     /// </summary>
     public static void Check(V2 c, float half)
     {
-        // Spine: short arm up-left, then a longer arm up-right, joined at the elbow.
-        V2[] spine = [new(0.02f, 0.50f), new(0.36f, 0.90f), new(0.98f, 0.16f)];
+        // Spine: short arm up-left, then a longer arm up-right, joined at the elbow. The
+        // reference tick is wide and shallow (about 1.5:1), so the x span is stretched.
+        V2[] spine = [new(0.02f, 0.50f), new(0.41f, 0.90f), new(1.12f, 0.16f)];
         // Bar half-width in the unit box. 0.183 is the X's 0.135 rescaled for this spine's
         // fitted ink width, so the two badges carry the same bar (0.552 of the ink).
         const float Bar = 0.183f;
@@ -150,13 +170,12 @@ public static class GlyphGeometry
         var mid = V2.Normalize(n0 + n1);
         float scale = 1f / MathF.Max(0.4f, V2.Dot(mid, n1));
 
-        var pts = new List<V2>
-        {
-            spine[0] + n0 * Bar,               // outer edge of the short arm
-            spine[1] + mid * Bar * scale,      // outer corner at the elbow
-        };
-        Cap(pts, spine[2], n1, d1, Bar);       // cap on the long arm
-        pts.Add(spine[1] - mid * Bar * scale); // inner corner at the elbow
+        var pts = new List<V2> { spine[0] + n0 * Bar };  // outer edge of the short arm
+        Sweep(pts, spine[1], n0, n1, Bar);              // ROUND bottom corner (a join arc)
+        pts.Add(spine[2] + n1 * Bar);
+        Cap(pts, spine[2], n1, d1, Bar);                // cap on the long arm
+        pts.Add(spine[1] - mid * Bar * scale);          // inner corner at the elbow, sharp
+        pts.Add(spine[0] - n0 * Bar);
         // Cap on the short arm. n0 is flipped so the walk starts on the arm's INNER end
         // corner (the one the contour reaches from the inner elbow) and closes back on the
         // outer one; walking it the other way crosses the contour and drops a detached nub.
