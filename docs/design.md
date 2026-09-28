@@ -125,6 +125,13 @@ the gap BETWEEN clusters must exceed the gap WITHIN a cluster, so the left clust
     centre, `HeaderLayout.RowCenterFor(plot top)`, so the row can only move as one and
     always sits centred in the space between the widget's top edge and the first
     horizontal line. The corner brackets belong to the card, not the row.
+23. The badges are FILLED glyphs: one opaque polygon each (`CrossPolygon` for the X,
+    `CheckPolygon` for the tick). Two round-capped strokes are banned — they show their
+    construction, with a brighter patch where they cross. The polygon's ink half-extent
+    is what `HeaderLayout` reserves, so the reserve and the ink cannot drift.
+24. The value bar is a plain box, square corners, no radius (the reference draws it that
+    way). Segments inside a mode row are 2px apart so the pair reads as ONE control, and
+    the two mode rows are 12px apart so they read as two.
 
 ## Containers
 

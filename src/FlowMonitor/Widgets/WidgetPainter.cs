@@ -81,16 +81,18 @@ public static class WidgetPainter
         dc.PushAxisAlignedClip(new RectF(0, 0, width, height), AntialiasMode.Aliased);
         dc.Transform = Matrix3x2.CreateScale(sc, sc, center);
 
-        // ✓ glyph, sized as before; only its brightness reacts to hover.
+        // ✓ glyph: one filled outline, not two strokes. Two round-capped lines showed
+        // their construction (a brighter square where they crossed); a single opaque
+        // polygon has one uniform ink.
         float r = size * BadgeInk;
+        float t = Math.Max(1f, size * BadgeStroke) / 2f;      // half bar thickness
         var p0 = new V2(center.X - r * 0.44f, center.Y + r * 0.02f);
         var p1 = new V2(center.X - r * 0.11f, center.Y + r * 0.35f);
         var p2 = new V2(center.X + r * BadgeArm, center.Y - r * 0.36f);
 
-        float w = Math.Max(2f, size * BadgeStroke);
         var glyph = res.Brush(new Color4(1f, 1f, 1f, amount * (0.5f + 0.5f * hover)));
-        dc.DrawLine(p0, p1, glyph, w, res.RoundStroke);
-        dc.DrawLine(p1, p2, glyph, w, res.RoundStroke);
+        using var tick = FilledGlyph(res, CheckPolygon(p0, p1, p2, t));
+        dc.FillGeometry(tick, glyph);
 
         dc.Transform = Matrix3x2.Identity;
         dc.PopAxisAlignedClip();
@@ -115,16 +117,78 @@ public static class WidgetPainter
         dc.PushAxisAlignedClip(new RectF(0, 0, width, height), AntialiasMode.Aliased);
         dc.Transform = Matrix3x2.CreateScale(sc, sc, center);
 
-        // ✕ glyph: two crossing round-capped strokes; only brightness reacts to hover.
+        // ✕ glyph: one filled outline. Two crossing strokes showed their construction;
+        // a single opaque polygon is a real icon.
         float r = size * BadgeInk;
-        float w = Math.Max(2f, size * BadgeStroke);
-        float d = r * BadgeArm;
+        float t = Math.Max(1f, size * BadgeStroke) / 2f;
+        float half = r * BadgeArm + t;                       // same ink half-extent as before
         var glyph = res.Brush(new Color4(1f, 1f, 1f, amount * (0.5f + 0.5f * hover)));
-        dc.DrawLine(new V2(center.X - d, center.Y - d), new V2(center.X + d, center.Y + d), glyph, w, res.RoundStroke);
-        dc.DrawLine(new V2(center.X - d, center.Y + d), new V2(center.X + d, center.Y - d), glyph, w, res.RoundStroke);
+        using var cross = FilledGlyph(res, CrossPolygon(center, half, t));
+        dc.FillGeometry(cross, glyph);
 
         dc.Transform = Matrix3x2.Identity;
         dc.PopAxisAlignedClip();
+    }
+
+    /// <summary>Builds a closed filled geometry from a point list.</summary>
+    static ID2D1PathGeometry FilledGlyph(ResourceCache res, V2[] pts)
+    {
+        var geo = res.D2DFactory.CreatePathGeometry();
+        using (var sink = geo.Open())
+        {
+            sink.BeginFigure(pts[0], FigureBegin.Filled);
+            sink.AddLines(pts);
+            sink.EndFigure(FigureEnd.Closed);
+            sink.Close();
+        }
+        return geo;
+    }
+
+    /// <summary>
+    /// A filled X as one polygon: a plus of arm half-length half*sqrt2 and half-thickness
+    /// t, rotated 45 degrees. Its ink half-extent is `half`, so HeaderLayout's reserve
+    /// still describes what is drawn.
+    /// </summary>
+    static V2[] CrossPolygon(V2 c, float half, float t)
+    {
+        float a = (float)(half * Math.Sqrt(2.0));
+        var plus = new[]
+        {
+            new V2(0, -a), new V2(t, -a), new V2(t, -t), new V2(a, -t),
+            new V2(a, t), new V2(t, t), new V2(t, a), new V2(-t, a),
+            new V2(-t, t), new V2(-a, t), new V2(-a, -t), new V2(-t, -t),
+        };
+        var outPts = new V2[plus.Length];
+        for (int i = 0; i < plus.Length; i++)
+        {
+            // Rotate 45 degrees: the plus becomes the X.
+            double x = (plus[i].X + plus[i].Y) * 0.70710678118654752;
+            double y = (plus[i].Y - plus[i].X) * 0.70710678118654752;
+            outPts[i] = new V2(c.X + (float)x, c.Y + (float)y);
+        }
+        return outPts;
+    }
+
+    /// <summary>The check as one filled outline: both arms offset by the bar half-thickness.</summary>
+    static V2[] CheckPolygon(V2 p0, V2 p1, V2 p2, float t)
+    {
+        static V2 Norm(V2 a, V2 b, float half)
+        {
+            double dx = b.X - a.X, dy = b.Y - a.Y, len = Math.Sqrt(dx * dx + dy * dy);
+            if (len < 1e-6) return new V2(0, -half);
+            return new V2((float)(-dy / len * half), (float)(dx / len * half));
+        }
+        var n0 = Norm(p0, p1, t);      // left arm, outward side
+        var n1 = Norm(p1, p2, t);
+        return
+        [
+            new V2(p0.X + n0.X, p0.Y + n0.Y),
+            new V2(p1.X + n0.X, p1.Y + n0.Y),
+            new V2(p2.X + n1.X, p2.Y + n1.Y),
+            new V2(p2.X - n1.X, p2.Y - n1.Y),
+            new V2(p1.X - n1.X, p1.Y - n1.Y),
+            new V2(p0.X - n0.X, p0.Y - n0.Y),
+        ];
     }
 
     /// <summary>

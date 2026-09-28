@@ -483,7 +483,6 @@ internal static class ColorPickerWindow
     static void DrawValueBar(ID2D1DeviceContext dc, ResourceCache res, float s)
     {
         var track = S(Picker.ValueTrack, s);
-        float r = track.Width / 2f;
         var props = new LinearGradientBrushProperties(
             new V2(0f, track.Top), new V2(0f, track.Bottom));
         using var stops = dc.CreateGradientStopCollection(
@@ -492,8 +491,9 @@ internal static class ColorPickerWindow
             new GradientStop(1f, new Color4(0f, 0f, 0f, 1f)),
         ], Gamma.Linear, ExtendMode.Clamp);
         using var ramp = dc.CreateLinearGradientBrush(props, stops);
-        dc.FillRoundedRectangle(new RoundedRectangle(track, r, r), ramp);
-        dc.DrawRoundedRectangle(new RoundedRectangle(track, r, r), res.Brush(new Color4(0f, 0f, 0f, 0.8f)), 1f * s);
+        // Square corners: the reference bar is a plain box, not a pill.
+        dc.FillRectangle(track, ramp);
+        dc.DrawRectangle(track, res.Brush(new Color4(0f, 0f, 0f, 0.8f)), 1f * s);
 
         // Handle: max(width * 0.35, 1) tall, held 2px inside each end, black with the
         // current value as its grey core, one pixel bigger on every side while pressed.

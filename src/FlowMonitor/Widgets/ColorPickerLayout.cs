@@ -45,33 +45,42 @@ public enum PickerModel
 /// </summary>
 public static class ColorPickerLayout
 {
-    public const float CardW = 320f;
-    public const float CardH = 542f;
-    public const float Pad = 20f;
-    public const float Radius = 30f;
+    public const float CardW = 260f;
+    public const float CardH = 472f;
+    public const float Pad = 14f;
+    public const float Radius = 24f;
 
-    // Reference card: the wheel takes the row, the bar is a thin strip at the far edge
-    // with a hair of gap (Blender: PICKER_BAR, PICKER_SPACE).
-    public const float BarW = 14f;
-    public const float Space = 6f;
+    // Reference card measured: wheel 158 of 180 content, bar 14 wide with a 9px gap.
+    // The card is smaller than our first port and the text stays 12px, so the labels
+    // read bigger against the controls than the reference's 7px do.
+    public const float BarW = 18f;
+    public const float Space = 10f;
     public const float WheelD = CardW - Pad * 2f - BarW - Space;
     public const float WheelR = WheelD / 2f;
     /// <summary>Wheel centre; the wheel is a disc that fills its own box.</summary>
     public static readonly PointF Center = new(Pad + WheelR, Pad + WheelR);
-    public const float MarkerR = 9f;
+    public const float MarkerR = 8f;
     public const float MarkerStroke = 2f;
 
-    public const float RowH = 28f;
-    public const float RowGap = 4f;
-    public const float SpaceRowY = Pad + WheelD + 10f;
-    public const float ModelRowY = SpaceRowY + RowH + RowGap;
-    public const float SliderY0 = ModelRowY + RowH + 10f;
-    public const float HexY = SliderY0 + 4 * (RowH + RowGap) + 6f;
+    public const float RowH = 26f;
+    /// <summary>Between rows of the same kind (the reference uses 4 of 180).</summary>
+    public const float RowGap = 5f;
+    /// <summary>
+    /// Between the two halves of a mode row. The reference draws them adjacent; a hair
+    /// of gap is the most we add, so the pair reads as one control.
+    /// </summary>
+    public const float SegGap = 2f;
+    /// <summary>Between the two mode rows, which the reference holds further apart (10 of 180).</summary>
+    public const float ModeGap = 12f;
+    public const float SpaceRowY = Pad + WheelD + 14f;
+    public const float ModelRowY = SpaceRowY + RowH + ModeGap;
+    public const float SliderY0 = ModelRowY + RowH + RowGap;
+    public const float HexY = SliderY0 + 4 * RowH + 3 * RowGap + 12f;
     /// <summary>Room for the mode-row label text and for the number in a slider row.</summary>
-    public const float ChanLabelW = 82f;
-    public const float ChanValueW = 46f;
+    public const float ChanLabelW = 70f;
+    public const float ChanValueW = 42f;
     public const float ChanGroove = 5f;
-    public const float HexLabelW = 38f;
+    public const float HexLabelW = 34f;
     public const float DropW = 32f;
     /// <summary>
     /// Inset for anything drawn inside a container: a segment's label, a slider's label
@@ -90,8 +99,8 @@ public static class ColorPickerLayout
 
     /// <summary>Half of a mode row: 0 = left segment, 1 = right segment.</summary>
     public static RectangleF Segment(int row, int half)
-        => new(Pad + half * ((CardW - Pad * 2f) / 2f + RowGap), row == 0 ? SpaceRowY : ModelRowY,
-            (CardW - Pad * 2f) / 2f - RowGap, RowH);
+        => new(Pad + half * ((CardW - Pad * 2f) / 2f + SegGap), row == 0 ? SpaceRowY : ModelRowY,
+            (CardW - Pad * 2f) / 2f - SegGap, RowH);
 
     /// <summary>Number-slider row 0..3 (RGB: R G B Alpha; HSV: Hue Saturation Value Alpha).</summary>
     public static RectangleF Slider(int i) => new(Pad, SliderY0 + i * (RowH + RowGap), CardW - Pad * 2f, RowH);

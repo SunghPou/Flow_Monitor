@@ -769,7 +769,7 @@ public static class SelfTest
                 // The card is Blender's, row for row: the wheel row, the two mode rows,
                 // four sliders, then the hex field and the dropper, all inside the card.
                 float lastBottom = ColorPickerLayout.Slider(3).Bottom;
-                Check(Math.Abs(ColorPickerLayout.HexY - lastBottom - 10f) < 0.01f
+                Check(Math.Abs(ColorPickerLayout.HexY - lastBottom - 12f) < 0.01f
                     && Math.Abs(ColorPickerLayout.HexY + ColorPickerLayout.RowH + ColorPickerLayout.Pad
                         - ColorPickerLayout.CardH) < 0.01f,
                     "the card is the reference card, row for row",
