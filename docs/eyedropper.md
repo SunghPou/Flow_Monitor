@@ -35,7 +35,11 @@ user moves it anywhere -> click sets the colour. No drag-averaging, no magnifier
     (`SetCursor` returns the previous handle); sightings need a still mouse.
 
 ## Verified facts (selftest asserts, run every time)
-- `EyedropperCursor.Handle != 0` (pipette mask builds from Blender's icon).
+- `EyedropperCursor.Handle != 0` (pipette builds from the card's vector walk as a
+  32bpp alpha cursor: white fill, 1px black outline, hot spot scanned off the tip).
+  A 1bpp monochrome cursor drew only jagged white pixels with no outline; the
+  colour cursor anti-aliases. `--capture` writes `31-cursor-preview.png` (8x on a
+  checkerboard) so the art is viewable.
 - Rendered wheel pixels: cyan top, red bottom (31-picker sheet, `2b`).
 - Wheel mapping: red at bottom, clockwise (`3d`); shader comment records the
   clip-y-up vs bitmap-row-down sign.

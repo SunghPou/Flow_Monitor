@@ -833,6 +833,16 @@ public static class SelfTest
                 // never visibly changes, which is exactly the reported failure.
                 Check(Interop.EyedropperCursor.Handle != IntPtr.Zero, "eyedropper cursor handle builds",
                     $"handle=0x{Interop.EyedropperCursor.Handle.ToInt64():X}");
+                Check(Interop.EyedropperCursor.OpaquePixels > 80 && Interop.EyedropperCursor.WhitePixels > 15
+                        && Interop.EyedropperCursor.DarkPixels > 30,
+                    "eyedropper cursor renders white fill with a dark outline",
+                    $"opaque={Interop.EyedropperCursor.OpaquePixels} white={Interop.EyedropperCursor.WhitePixels} dark={Interop.EyedropperCursor.DarkPixels}");
+                if (captureDir.Length > 0)
+                    Interop.EyedropperCursor.SavePreview(System.IO.Path.Combine(captureDir, "31-cursor-preview.png"));
+                Check(Interop.EyedropperCursor.HotX >= 0 && Interop.EyedropperCursor.HotX < 32
+                        && Interop.EyedropperCursor.HotY >= 0 && Interop.EyedropperCursor.HotY < 32,
+                    "eyedropper hot spot sits on the rendered tip",
+                    $"hot=({Interop.EyedropperCursor.HotX},{Interop.EyedropperCursor.HotY})");
 
                 // The overlay owns the cursor for the pick: the pointer is always over
                 // our window, so its WM_SETCURSOR is the whole mechanism. A global
