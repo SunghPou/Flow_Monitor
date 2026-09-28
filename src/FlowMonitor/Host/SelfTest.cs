@@ -743,21 +743,37 @@ public static class SelfTest
                 Check(worstH < 0.6f && worstS < 0.002f, "wheel marker and wheel are inverses",
                     $"worst hue error {worstH:0.00} deg, worst saturation error {worstS:0.000}");
 
-                float vx = ColorPickerLayout.XFromValue(0.62);
-                Check(Math.Abs((double)ColorPickerLayout.ValueFromX(vx) - 0.62) < 0.005,
-                    "value slider and its handle are inverses",
-                    $"value 0.62 -> x {vx:0.0} -> {ColorPickerLayout.ValueFromX(vx):0.000}");
+                float vy = ColorPickerLayout.YFromValue(0.62);
+                Check(Math.Abs(ColorPickerLayout.ValueFromY(vy) - 0.62) < 0.005,
+                    "the vertical value bar and its handle are inverses",
+                    $"value 0.62 -> y {vy:0.0} -> {ColorPickerLayout.ValueFromY(vy):0.000}");
+
+                Check(ColorPickerLayout.ValueTrack.Left >= ColorPickerLayout.Center.X + ColorPickerLayout.WheelR
+                    && ColorPickerLayout.ValueTrack.Width < 40f,
+                    "the value bar stands beside the wheel, not under it",
+                    $"bar at x {ColorPickerLayout.ValueTrack.Left:0}..{ColorPickerLayout.ValueTrack.Right:0} ({ColorPickerLayout.ValueTrack.Width:0}px wide) beside a wheel ending at {ColorPickerLayout.Center.X + ColorPickerLayout.WheelR:0}");
+
+                var g0 = ColorPickerLayout.Groove(0);
+                Check(Math.Abs(ColorPickerLayout.ChannelFromX(0, ColorPickerLayout.XFromChannel(0, 200)) - 200) <= 1
+                    && ColorPickerLayout.XFromChannel(0, 0) >= g0.Left - 0.01f
+                    && ColorPickerLayout.XFromChannel(0, 255) <= g0.Right + 0.01f,
+                    "channel groove and its handle are inverses",
+                    $"channel 200 -> x {ColorPickerLayout.XFromChannel(0, 200):0.0} -> {ColorPickerLayout.ChannelFromX(0, ColorPickerLayout.XFromChannel(0, 200))}, groove {g0.Left:0}..{g0.Right:0}");
 
                 Check(ColorPickerLayout.HitTest(c.X, c.Y) == PickerPart.Wheel
                     && ColorPickerLayout.HitTest(c.X + 90f, c.Y) == PickerPart.Wheel
-                    && ColorPickerLayout.HitTest(c.X + ColorPickerLayout.WheelR + 20f, c.Y) == PickerPart.None
-                    && ColorPickerLayout.HitTest(ColorPickerLayout.ValueTrack.Left + 30f,
+                    && ColorPickerLayout.HitTest(c.X + ColorPickerLayout.WheelR + 6f, c.Y) == PickerPart.None
+                    && ColorPickerLayout.HitTest(ColorPickerLayout.ValueTrack.Left + 10f,
                         ColorPickerLayout.ValueTrack.Top + 8f) == PickerPart.Value
+                    && ColorPickerLayout.HitTest(ColorPickerLayout.Channel(1).Left + 40f,
+                        ColorPickerLayout.Channel(1).Top + 5f) == PickerPart.ChannelG
+                    && ColorPickerLayout.HitTest(ColorPickerLayout.Hex.Left + 10f,
+                        ColorPickerLayout.Hex.Top + 5f) == PickerPart.Hex
                     && ColorPickerLayout.HitTest(ColorPickerLayout.Eyedropper.Left + 5f,
                         ColorPickerLayout.Eyedropper.Top + 5f) == PickerPart.Eyedropper
                     && ColorPickerLayout.HitTest(4f, 4f) == PickerPart.None,
-                    "hit-test agrees with what the wheel, slider and dropper draw",
-                    "inside the rim = wheel, outside it = none (click-away commits), slider = value, dropper = eyedropper, corner = none");
+                    "hit-test agrees with what the wheel, bar, sliders and dropper draw",
+                    "inside the rim = wheel, the gap between wheel and bar = none (click-away commits), bar = value, row 1 = channel G, hex and dropper fields = themselves, corner = none");
 
                 var dark = SystemTheme.CardFor(light: false);
                 var light = SystemTheme.CardFor(light: true);

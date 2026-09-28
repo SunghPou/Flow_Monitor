@@ -15,9 +15,9 @@ using SizeI = Vortice.Mathematics.SizeI;
 namespace FlowMonitor.Host;
 
 /// <summary>
-/// Modal colour picker shaped after Blender's colour picker: one full-bleed wheel
-/// where the angle is hue and the radius is saturation, a value slider under it, and
-/// read-only hex/R/G/B fields on a card that follows the system theme. Top-level
+/// Modal colour picker laid out after Blender's colour picker: a hue/saturation wheel
+/// with a thin vertical value bar beside it, one number-slider row per RGB channel,
+/// then the hex field and the eyedropper. Card follows the system theme. Top-level
 /// (WS_EX_TOOLWINDOW) and reuses WidgetSurface from the shared device.
 /// THREADING: Show runs on the UI thread with its own modal loop; blocking, and
 /// owns the GPU via SetMenuOpen while up.
@@ -35,6 +35,8 @@ internal static class ColorPickerWindow
     static PickerPart _drag = PickerPart.None;
     static bool _cancelled;
     static bool _up;
+    /// <summary>A desktop pick is in flight: the click belongs to the eyedropper.</summary>
+    static bool _picking;
 
     /// <summary>Wheel notch size for the value component (Blender's colorpicker_wheel_cb).</summary>
     const double WheelStep = 0.05;
@@ -85,9 +87,10 @@ internal static class ColorPickerWindow
                     return new IntPtr(0);
 
                 case Native.WM_SETCURSOR:
-                    // Blender shows its eyedropper cursor over the dropper field.
+                    // Blender shows its eyedropper cursor over the dropper field, and
+                    // everywhere on screen while a pick is in flight.
                     Interop.EyedropperCursor.Apply(
-                        Picker.HitTest(_mouse.X, _mouse.Y) == PickerPart.Eyedropper);
+                        _picking || Picker.HitTest(_mouse.X, _mouse.Y) == PickerPart.Eyedropper);
                     return new IntPtr(1);
 
                 case Native.WM_KEYDOWN:
@@ -99,6 +102,9 @@ internal static class ColorPickerWindow
                     return new IntPtr(0);
 
                 case Native.WM_ACTIVATE:
+                    // A pick in flight owns the mouse: losing activation to the window
+                    // under the cursor is the normal case, not a cancel.
+                    if (_picking) return new IntPtr(0);
                     if ((short)(wParam.ToInt64() & 0xFFFF) == 0) Close();
                     return new IntPtr(0);
             }
@@ -131,6 +137,7 @@ internal static class ColorPickerWindow
         _owner = widget;
         _up = false;
         _cancelled = false;
+        _picking = false;
         _drag = PickerPart.None;
         _onChanged = onChanged;
         _hsv = Rgba.FromHex(startHex).ToHsv();
@@ -252,10 +259,14 @@ internal static class ColorPickerWindow
 
     static void Down(IntPtr lParam)
     {
+        // While sampling the desktop the click belongs to the eyedropper, not the card.
+        if (_picking) { FinishPick(); return; }
+
         var (x, y) = ToLogical(lParam);
         var part = Picker.HitTest(x, y);
         if (part == PickerPart.None) { Close(); return; }
         if (part == PickerPart.Eyedropper) { PickScreen(); return; }
+        if (part == PickerPart.Hex) return;             // read-only field: no drag, no commit
         _drag = part;
         Apply(lParam);
         Paint();
@@ -271,7 +282,18 @@ internal static class ColorPickerWindow
         }
         else if (_drag == PickerPart.Value)
         {
-            _hsv = new Hsv(_hsv.H, _hsv.S, Picker.ValueFromX(x));
+            _hsv = new Hsv(_hsv.H, _hsv.S, Picker.ValueFromY(y));
+        }
+        else
+        {
+            int channel = (int)_drag - (int)PickerPart.ChannelR;
+            if (channel is >= 0 and < 3)
+            {
+                var (r, g, b) = _hsv.ToRgb();
+                byte v = Picker.ChannelFromX(channel, x);
+                if (channel == 0) r = v; else if (channel == 1) g = v; else b = v;
+                _hsv = new Rgba(r, g, b).ToHsv();
+            }
         }
         _hsv = _hsv.Normalized();
         NotifyChanged();
@@ -301,25 +323,53 @@ internal static class ColorPickerWindow
 
     /// <summary>
     /// Hands the desktop to the user: the card steps aside, the pipette cursor follows
-    /// the mouse anywhere, the next click samples that pixel, Esc cancels. Capture is
-    /// released first so the window under the mouse behaves normally while sampling.
+    /// the mouse anywhere, the next click samples that pixel, Esc cancels. The window
+    /// KEEPS the mouse capture, so every move and the click come back here even though
+    /// the cursor is over some other window; that is what makes the pipette cursor and
+    /// the sample land where the user aimed. A poll loop could do neither: it starved
+    /// the message pump, so Windows reset the cursor and the click was lost.
     /// </summary>
     static void PickScreen()
     {
-        Native.ReleaseCapture();
+        _picking = true;
         Native.ShowWindow(_hwnd, 0 /* SW_HIDE */);
-        Native.GetCursorPos(out _);
-        Thread.Sleep(60);
-        var picked = Interop.ScreenPick.PickUnderCursor();
+        try
+        {
+            Native.GetCursorPos(out _);
+            Native.SetCursor(Interop.EyedropperCursor.Handle);
+            while (true)
+            {
+                int r = Native.GetMessageW(out var msg, IntPtr.Zero, 0, 0);
+                if (r <= 0) break;
+                if (msg.message == Native.WM_LBUTTONDOWN) { FinishPick(); break; }
+                if (msg.message == Native.WM_KEYDOWN
+                    && (msg.wParam.ToInt64() & 0xFFFF) == Native.VK_ESCAPE) { _cancelled = true; _picking = false; break; }
+                Native.TranslateMessage(ref msg);
+                Native.DispatchMessageW(ref msg);
+            }
+        }
+        finally
+        {
+            _picking = false;
+            Interop.EyedropperCursor.Apply(false);
+        }
+        if (_hwnd == IntPtr.Zero) return;               // the pick loop tore the card down
+        Native.ShowWindow(_hwnd, 5 /* SW_SHOW */);
+        Native.SetForegroundWindow(_hwnd);
+        Native.SetCapture(_hwnd);
+        Paint();
+    }
+
+    /// <summary>Samples the pixel under the mouse and returns it to the card.</summary>
+    static void FinishPick()
+    {
+        Native.GetCursorPos(out var at);
+        var picked = Interop.ScreenPick.SampleAt(at.X, at.Y);
         if (picked is Rgba rgb)
         {
             _hsv = rgb.ToHsv();
             NotifyChanged();
         }
-        Native.ShowWindow(_hwnd, 5 /* SW_SHOW */);
-        Native.SetForegroundWindow(_hwnd);
-        Native.SetCapture(_hwnd);
-        Paint();
     }
 
     // ------------------------------------------------------------------ paint
@@ -367,8 +417,9 @@ internal static class ColorPickerWindow
         DrawValueVeil(dc, res, s);
 
         DrawWheelMarker(dc, res, s);
-        DrawValue(dc, res, s);
-        DrawFields(dc, res, s);
+        DrawValueBar(dc, res, s);
+        DrawChannels(dc, res, s);
+        DrawHex(dc, res, s);
         DrawEyedropper(dc, res, s);
 
         surface.EndDrawAndPresent();
@@ -389,53 +440,88 @@ internal static class ColorPickerWindow
     static void Ring(ID2D1DeviceContext dc, float x, float y, float d, ID2D1Brush brush, float width)
         => dc.DrawEllipse(new Ellipse(new V2(x + d / 2f, y + d / 2f), d / 2f, d / 2f), brush, width);
 
-    static void DrawValue(ID2D1DeviceContext dc, ResourceCache res, float s)
+    /// <summary>
+    /// Blender's value bar for the circle picker: a thin vertical gradient immediately
+    /// right of the wheel, not a full-width horizontal one (GRAD_V_ALT, PICKER_BAR wide).
+    /// </summary>
+    static void DrawValueBar(ID2D1DeviceContext dc, ResourceCache res, float s)
     {
         var track = S(Picker.ValueTrack, s);
         var pure = Pure();
 
-        // Black on the left, the hue at the current value on the right.
+        // Black at the top, the full hue at the bottom.
         var props = new LinearGradientBrushProperties(
-            new V2(track.Left, 0f), new V2(track.Right, 0f));
+            new V2(0f, track.Top), new V2(0f, track.Bottom));
         using var stops = dc.CreateGradientStopCollection(
         [
             new GradientStop(0f, new Color4(0f, 0f, 0f, 1f)),
             new GradientStop(1f, pure.ToColor4()),
         ], Gamma.Linear, ExtendMode.Clamp);
         using var grad = dc.CreateLinearGradientBrush(props, stops);
-        dc.FillRoundedRectangle(new RoundedRectangle(track, track.Height / 2f, track.Height / 2f), grad);
+        float r = track.Width / 2f;
+        dc.FillRoundedRectangle(new RoundedRectangle(track, r, r), grad);
 
-        float hx = Picker.XFromValue(_hsv.V) * s;
-        float hy = track.Top + track.Height / 2f;
+        float hx = track.Left + track.Width / 2f;
+        float hy = Picker.YFromValue(_hsv.V) * s;
         float d = Picker.MarkerR * 2 * s;
         var white = res.Brush(new Color4(1f, 1f, 1f, 1f));
         Ring(dc, hx - Picker.MarkerR * s, hy - Picker.MarkerR * s, d, white, Picker.MarkerStroke * s);
     }
 
-    static void DrawFields(ID2D1DeviceContext dc, ResourceCache res, float s)
+    /// <summary>
+    /// One number-slider row per RGB channel, the way Blender lays them out under the
+    /// wheel: the label on the left, a groove filled to the channel's value with a ring
+    /// handle, and the number on the right.
+    /// </summary>
+    static void DrawChannels(ID2D1DeviceContext dc, ResourceCache res, float s)
     {
         var cur = Current();
-        string[] values = [cur.ToHex(), cur.R.ToString(), cur.G.ToString(), cur.B.ToString()];
+        byte[] values = [cur.R, cur.G, cur.B];
+        Color4[] tints = [new(cur.R / 255f, 0.42f, 0.42f, 1f),
+                          new(0.42f, cur.G / 255f, 0.42f, 1f),
+                          new(0.42f, 0.42f, cur.B / 255f, 1f)];
+        var labelFmt = res.Format("Segoe UI Variable Text", 12f, Vortice.DirectWrite.FontWeight.Normal);
         var valueFmt = res.Format("Segoe UI Variable Text", 12f, Vortice.DirectWrite.FontWeight.Normal);
-        var labelFmt = res.Format("Segoe UI Variable Text", 15f, Vortice.DirectWrite.FontWeight.Normal);
-        for (int i = 0; i < 4; i++)
-        {
-            var pill = S(Picker.Pill(i), s);
-            dc.FillRoundedRectangle(
-                new RoundedRectangle(pill, 6f * s, 6f * s), res.Brush(SystemTheme.Pill));
-            // FieldPad keeps the value off the box edge on the left, as on the right.
-            float pad = Picker.FieldPad * s;
-            dc.DrawText(values[i], valueFmt,
-                new Rect(pill.X + pad, pill.Y, pill.Width - pad * 2f, pill.Height),
-                res.Brush(SystemTheme.Ink));
-            var label = S(Picker.PillLabel(i), s);
-            dc.DrawText(Picker.PillLabels[i], labelFmt,
-                new Rect(label.X, label.Y, label.Width, label.Height),
-                res.Brush(SystemTheme.MutedInk));
-        }
 
-        var div = S(new RectangleF(0f, Picker.DividerY, Picker.CardW, 1f), s);
-        dc.FillRectangle(div, res.Brush(SystemTheme.Hairline));
+        for (int i = 0; i < 3; i++)
+        {
+            var row = S(Picker.Channel(i), s);
+            dc.FillRoundedRectangle(new RoundedRectangle(row, 8f * s, 8f * s), res.Brush(SystemTheme.Pill));
+            dc.DrawText(Picker.ChannelLabels[i], labelFmt, new Rect(row.X, row.Y, row.Width, row.Height),
+                res.Brush(SystemTheme.MutedInk));
+
+            var groove = S(Picker.Groove(i), s);
+            float hr = groove.Height / 2f;
+            dc.FillRoundedRectangle(new RoundedRectangle(groove, hr, hr), res.Brush(SystemTheme.Field));
+            float fill = Picker.XFromChannel(i, values[i]) * s + hr - groove.Left;
+            if (fill > 0.5f)
+                dc.FillRoundedRectangle(
+                    new RoundedRectangle(new RectangleF(groove.Left, groove.Top, fill, groove.Height), hr, hr),
+                    res.Brush(tints[i]));
+
+            float hx = Picker.XFromChannel(i, values[i]) * s;
+            float d = 7f * s;
+            var white = res.Brush(new Color4(1f, 1f, 1f, 1f));
+            Ring(dc, hx - d / 2f, groove.Top + groove.Height / 2f - d / 2f, d, white, 1.6f * s);
+
+            // The number sits right-aligned, FieldPad clear of the box edge.
+            float pad = 8f * s;
+            dc.DrawText(values[i].ToString(), valueFmt,
+                new Rect(row.Right - Picker.ChanValueW * s, row.Y, Picker.ChanValueW * s - pad, row.Height),
+                res.Brush(SystemTheme.Ink));
+        }
+    }
+
+    /// <summary>The hex field. Read-only, like the read-only fields we ship.</summary>
+    static void DrawHex(ID2D1DeviceContext dc, ResourceCache res, float s)
+    {
+        var box = S(Picker.Hex, s);
+        dc.FillRoundedRectangle(new RoundedRectangle(box, 6f * s, 6f * s), res.Brush(SystemTheme.Pill));
+        var fmt = res.Format("Segoe UI Variable Text", 12f, Vortice.DirectWrite.FontWeight.Normal);
+        float pad = 8f * s;
+        dc.DrawText(Current().ToHex(), fmt,
+            new Rect(box.X + pad, box.Y, box.Width - pad * 2f, box.Height),
+            res.Brush(SystemTheme.Ink));
     }
 
     /// <summary>
