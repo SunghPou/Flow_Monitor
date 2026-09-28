@@ -1,5 +1,3 @@
-using System.Text;
-
 namespace FlowMonitor;
 
 /// <summary>
@@ -40,17 +38,14 @@ public static class Log
         if (!_enabled) return;
         try
         {
-            var sb = new StringBuilder();
-            sb.Append(DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff"));
-            sb.Append(" [").Append(level).Append("] ");
-            sb.AppendLine(message);
+            string line = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} [{level}] {message}{Environment.NewLine}";
 
             // Two destinations on purpose: the roaming-friendly one under %LOCALAPPDATA%, and a
             // copy next to the executable so a portable copy that cannot write to the profile
             // still leaves a trace.
             foreach (string p in new[] { Path1, System.IO.Path.Combine(AppContext.BaseDirectory, "flowmonitor.log") })
             {
-                try { System.IO.File.AppendAllText(p, sb.ToString()); } catch { }
+                try { System.IO.File.AppendAllText(p, line); } catch { }
             }
         }
         catch { }

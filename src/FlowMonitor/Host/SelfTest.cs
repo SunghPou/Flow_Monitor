@@ -110,13 +110,14 @@ public static class SelfTest
                     int pw = pick.Width;
                     var cc = ColorPickerLayout.Center;
                     float ro = ColorPickerLayout.WheelR - 22f;
-                    bool Probe(float qx, float qy, Func<byte, byte, byte, bool> ok)
+                    int At(byte[] px, float qx, float qy) => ((int)qy * pw + (int)qx) * 4;
+                    bool Probe(byte[] px, float qx, float qy, Func<byte, byte, byte, bool> ok)
                     {
-                        int i = ((int)qy * pw + (int)qx) * 4;
-                        return ok(wheelPx[i + 2], wheelPx[i + 1], wheelPx[i]);
+                        int i = At(px, qx, qy);
+                        return ok(px[i + 2], px[i + 1], px[i]);
                     }
-                    bool topCyan = Probe(cc.X, cc.Y - ro, (r, g, b) => g > 150 && b > 150 && r < 120);
-                    bool botRed = Probe(cc.X, cc.Y + ro, (r, g, b) => r > 150 && g < 120 && b < 120);
+                    bool topCyan = Probe(wheelPx, cc.X, cc.Y - ro, (r, g, b) => g > 150 && b > 150 && r < 120);
+                    bool botRed = Probe(wheelPx, cc.X, cc.Y + ro, (r, g, b) => r > 150 && g < 120 && b < 120);
                     Check(topCyan && botRed, "rendered wheel puts cyan at the top and red at the bottom",
                         $"top ({cc.X:0},{cc.Y - ro:0}) cyan={topCyan}, bottom ({cc.X:0},{cc.Y + ro:0}) red={botRed}");
 
@@ -128,9 +129,9 @@ public static class SelfTest
                             new Hsv(275, 0.62, 1.0), new TestRenderHost(device, resources));
                     var barPx = pick.CaptureToPixels(device);
                     var vt = ColorPickerLayout.ValueTrack;
-                    int barMid = ((int)(vt.Top + vt.Height / 2f) * pw + (int)(vt.Left + vt.Width / 2f)) * 4;
+                    int barMid = At(barPx, vt.Left + vt.Width / 2f, vt.Top + vt.Height / 2f);
                     int midR = barPx[barMid + 2], midG = barPx[barMid + 1], midB = barPx[barMid];
-                    int barLow = ((int)(vt.Bottom - 4f) * pw + (int)(vt.Left + vt.Width / 2f)) * 4;
+                    int barLow = At(barPx, vt.Left + vt.Width / 2f, vt.Bottom - 4f);
                     int lowR = barPx[barLow + 2], lowG = barPx[barLow + 1], lowB = barPx[barLow];
                     Check(midR is > 85 and < 170 && Math.Abs(midR - midG) < 20 && Math.Abs(midR - midB) < 20
                             && lowR < 45 && lowG < 45 && lowB < 45,
@@ -143,7 +144,7 @@ public static class SelfTest
                         ColorPickerWindow.PaintTo(pick, resources, 1f,
                             new Hsv(275, 0.62, 0.2), new TestRenderHost(device, resources));
                     var dimPx = pick.CaptureToPixels(device);
-                    int wi = ((int)(cc.Y - ro) * pw + (int)cc.X) * 4;
+                    int wi = At(dimPx, cc.X, cc.Y - ro);
                     int bright = Math.Abs(wheelPx[wi + 2] - dimPx[wi + 2])
                         + Math.Abs(wheelPx[wi + 1] - dimPx[wi + 1]) + Math.Abs(wheelPx[wi] - dimPx[wi]);
                     Check(bright < 24, "the wheel keeps full brightness when the value drops",
@@ -197,23 +198,29 @@ public static class SelfTest
             // ---- 3. staged captures -------------------------------------------
             // Incremental stages so a failure names the broken capability, not just "blank".
             int stage = 0;
+            // One BeginDraw/Clear/paint/readback/Present/Commit sequence for every frame:
+            // Capture, GrabModel and GrabBadges differed only in the paint step and
+            // whether the frame is saved to disk.
+            byte[] GrabFrame(Action<ID2D1DeviceContext> paint, string path)
+            {
+                surface.BeginDraw(96f);
+                surface.Context.Clear(new Vortice.Mathematics.Color4(0, 0, 0, 0));
+                paint(surface.Context);
+                // Read before Present: after Present the flip-model index moves.
+                surface.EndDrawOnly();
+                if (path.Length > 0) surface.CaptureToBmp(device, path);
+                var px = surface.CaptureToPixels(device);
+                surface.Present();
+                surface.Commit(device);
+                return px;
+            }
             void Capture(string name, Action<ID2D1DeviceContext> paint)
             {
                 stage++;
                 string file = captureDir.Length > 0
                     ? System.IO.Path.Combine(captureDir, $"{stage:D2}-{name}.bmp")
                     : "";
-                surface.BeginDraw(96f);
-                surface.Context.Clear(new Vortice.Mathematics.Color4(0, 0, 0, 0));
-                paint(surface.Context);
-                // Read before Present: after Present the flip-model index moves.
-                surface.EndDrawOnly();
-                if (file.Length > 0)
-                {
-                    surface.CaptureToBmp(device, file);
-                }
-                surface.Present();
-                surface.Commit(device);
+                GrabFrame(paint, file);
                 if (file.Length > 0)
                 {
                     Log.Info($"stage {stage} '{name}' -> {file} ({new System.IO.FileInfo(file).Length} bytes)");
@@ -267,18 +274,14 @@ public static class SelfTest
             // at any clock, and one new sample shifts history by exactly one slot.
             byte[] GrabModel(ChartModel model, double now, string path, WidgetConfig? cfg = null)
             {
-                surface.BeginDraw(96f);
-                surface.Context.Clear(new Vortice.Mathematics.Color4(0, 0, 0, 0));
-                WidgetPainter.PaintBackground(surface.Context, resources,
-                    new WidgetConfig { CornerRadius = 8, Transparency = 12 }, surface.Width, surface.Height,
-                    hover: 0f, checkAmount: 0f, editing: false);
-                chart.Draw(surface.Context, cfg ?? new WidgetConfig(), model, 96f, now, surface.Width, surface.Height);
-                surface.EndDrawOnly();
-                if (path.Length > 0) surface.CaptureToBmp(device, path);
-                var px = surface.CaptureToPixels(device);
-                surface.Present();
-                surface.Commit(device);
-                return px;
+                cfg ??= new WidgetConfig();
+                return GrabFrame(dc =>
+                {
+                    WidgetPainter.PaintBackground(dc, resources,
+                        new WidgetConfig { CornerRadius = 8, Transparency = 12 }, surface.Width, surface.Height,
+                        hover: 0f, checkAmount: 0f, editing: false);
+                    chart.Draw(dc, cfg, model, 96f, now, surface.Width, surface.Height);
+                }, path);
             }
 
             byte[] Grab(double now, string path) => GrabModel(sine, now, path);
@@ -286,21 +289,17 @@ public static class SelfTest
             /// <summary>Renders a frame with the edit badges painted at hover brightness.</summary>
             byte[] GrabBadges(ChartModel model, HeaderLayout badges)
             {
-                surface.BeginDraw(96f);
-                surface.Context.Clear(new Vortice.Mathematics.Color4(0, 0, 0, 0));
                 var cfg = new WidgetConfig();
-                WidgetPainter.PaintBackground(surface.Context, resources, cfg, surface.Width,
-                    surface.Height, hover: 0f, checkAmount: 1f, editing: true);
-                chart.Draw(surface.Context, cfg, model, 96f, TestNow, surface.Width, surface.Height);
-                WidgetPainter.PaintCloseButton(surface.Context, resources, cfg, surface.Width,
-                    surface.Height, badges.Close, 1f, hover: 1f);
-                WidgetPainter.PaintCheckMark(surface.Context, resources, cfg, surface.Width,
-                    surface.Height, badges.Check, 1f, hover: 1f);
-                surface.EndDrawOnly();
-                var px = surface.CaptureToPixels(device);
-                surface.Present();
-                surface.Commit(device);
-                return px;
+                return GrabFrame(dc =>
+                {
+                    WidgetPainter.PaintBackground(dc, resources, cfg, surface.Width,
+                        surface.Height, hover: 0f, checkAmount: 1f, editing: true);
+                    chart.Draw(dc, cfg, model, 96f, TestNow, surface.Width, surface.Height);
+                    WidgetPainter.PaintCloseButton(dc, resources, cfg, surface.Width,
+                        surface.Height, badges.Close, 1f, hover: 1f);
+                    WidgetPainter.PaintCheckMark(dc, resources, cfg, surface.Width,
+                        surface.Height, badges.Check, 1f, hover: 1f);
+                }, "");
             }
 
             void Check(bool ok, string label, string detail)
@@ -413,11 +412,11 @@ public static class SelfTest
 
             // Sliding (opt-in, MC performance-sliding-graphs): same snapshot at
             // different intra-tick phases moves; the same phase repeats exactly.
+            // One config for the four blocks below; Snap already sets the 1s interval.
+            var slideCfg = new WidgetConfig { SlidingGraphs = true };
             {
-                var slideCfg = new WidgetConfig { SlidingGraphs = true };
                 Snap(sine);
                 sine.LastSampleTime = TestNow;
-                sine.SampleIntervalSec = 1.0;
                 byte[] s1 = GrabModel(sine, TestNow + 0.25, Cap("10-slide-a"), slideCfg);
                 byte[] s1b = GrabModel(sine, TestNow + 0.25, "", slideCfg);
                 byte[] s2 = GrabModel(sine, TestNow + 0.75, Cap("10-slide-b"), slideCfg);
@@ -430,18 +429,15 @@ public static class SelfTest
             // Tick continuity with sliding on: index k at progress 1 sits exactly
             // where index k+1 lands at progress 0, so the tick itself cannot snap.
             {
-                var slideCfg = new WidgetConfig { SlidingGraphs = true };
                 var cont = BuildSineModel(surface.Width, surface.Height);
                 double t0 = TestNow - 60.0;
                 for (int i = 0; i < 60; i++)
                     cont.Series[0].Data.Add(t0 + i, i == 20 ? 95f : 30f);
                 Snap(cont);
-                cont.SampleIntervalSec = 1.0;
                 int c1 = FindPeakColumn(GrabModel(cont, cont.LastSampleTime + 1.0, Cap("11-tick-before"), slideCfg),
                     surface.Width, surface.Height);
                 cont.Series[0].Data.Add(t0 + 60, 30f);
                 Snap(cont);
-                cont.SampleIntervalSec = 1.0;
                 int c2 = FindPeakColumn(GrabModel(cont, cont.LastSampleTime, Cap("11-tick-after"), slideCfg),
                     surface.Width, surface.Height);
                 Check(c1 >= 0 && c2 >= 0 && Math.Abs(c2 - c1) <= 1, "tick boundary is continuous",
@@ -452,12 +448,12 @@ public static class SelfTest
             // full plot width statically; with sliding on, the entering slot past
             // the right edge stays invisible behind the clip.
             {
-                var slideCfg = new WidgetConfig { SlidingGraphs = true };
                 var full = BuildSineModel(surface.Width, surface.Height);
                 Seed(full.Series[0].Data, 60, TestNow + Headroom);
                 Snap(full);
                 byte[] pxFull = GrabModel(full, full.LastSampleTime, Cap("12-full-width"));
-                var (minX, maxX) = MinMaxAccentX(pxFull, surface.Width, surface.Height, 50, surface.Height - 12);
+                var (minX, maxX) = ScanX(pxFull, surface.Width, surface.Height, 0, surface.Width,
+                    50, surface.Height - 12, IsAccent);
                 double rEdge = surface.Width - 12.0, lEdge = 12.0;
                 Check(minX >= 0 && minX <= lEdge + 2 * slotW && maxX >= rEdge - 2 * slotW,
                     "mature curve spans the full plot width",
@@ -472,10 +468,8 @@ public static class SelfTest
             // Per-frame motion with sliding on is sub-slot: one 60fps step cannot
             // move the peak a column (slotW/60 per frame).
             {
-                var slideCfg = new WidgetConfig { SlidingGraphs = true };
                 Snap(sine);
                 sine.LastSampleTime = TestNow;
-                sine.SampleIntervalSec = 1.0;
                 int p1 = FindPeakColumn(GrabModel(sine, TestNow + 0.5, "", slideCfg), surface.Width, surface.Height);
                 int p2 = FindPeakColumn(GrabModel(sine, TestNow + 0.5 + 1.0 / 60.0, "", slideCfg), surface.Width, surface.Height);
                 Check(p1 >= 0 && p2 >= 0 && Math.Abs(p2 - p1) <= 1, "per-frame displacement stays sub-pixel",
@@ -571,11 +565,11 @@ public static class SelfTest
                 Seed(columnModel.Series[0].Data, SeedCount, TestNow + Headroom);
                 Snap(columnModel);
                 columnModel.EditChrome = false;
-                var (lockedLeft, _) = GrayInkX(GrabModel(columnModel, TestNow, ""),
-                    surface.Width, surface.Height, 0, 70, plotTopScan);
+                var (lockedLeft, _) = ScanX(GrabModel(columnModel, TestNow, ""),
+                    surface.Width, surface.Height, 0, 70, plotTopScan, surface.Height, GrayAt);
                 columnModel.EditChrome = true;
-                var (editLeft, _) = GrayInkX(GrabModel(columnModel, TestNow, ""),
-                    surface.Width, surface.Height, 0, 70, plotTopScan);
+                var (editLeft, _) = ScanX(GrabModel(columnModel, TestNow, ""),
+                    surface.Width, surface.Height, 0, 70, plotTopScan, surface.Height, GrayAt);
                 Check(lockedLeft > 0 && lockedLeft == editLeft,
                     "the axis-label column does not move in edit mode",
                     $"label ink starts at x={lockedLeft} locked and x={editLeft} editing " +
@@ -594,9 +588,10 @@ public static class SelfTest
                 var badges = HeaderLayout.Compute(surface.Width, 45f, 60f, editing: true, geo.LabelColumnX);
                 var pxBadges = GrabBadges(badgeModel, badges);
                 int labelHi = (int)geo.Rect.Left + 8;
-                var (labelInkL, _) = GrayInkX(pxBadges, surface.Width, surface.Height, 0, labelHi, plotTopScan);
-                var (xInkL, xInkR) = BrightInkX(pxBadges, surface.Width, surface.Height, 0, labelHi,
-                    (int)(HeaderLayout.RowCenter - 14f), (int)(HeaderLayout.RowCenter + 14f));
+                var (labelInkL, _) = ScanX(pxBadges, surface.Width, surface.Height, 0, labelHi,
+                    plotTopScan, surface.Height, GrayAt);
+                var (xInkL, xInkR) = ScanX(pxBadges, surface.Width, surface.Height, 0, labelHi,
+                    (int)(HeaderLayout.RowCenter - 14f), (int)(HeaderLayout.RowCenter + 14f), BrightAt);
                 Check(labelInkL > 0 && xInkL > 0 && Math.Abs(xInkL - labelInkL) <= 2,
                     "X badge ink starts on the tick values' left edge",
                     $"X ink spans x={xInkL}..{xInkR}px, tick values start at x={labelInkL}px " +
@@ -614,8 +609,10 @@ public static class SelfTest
             Seed(wideModel.Series[0].Data, SeedCount, TestNow + Headroom);
             Snap(wideModel);
             byte[] pxWide = GrabModel(wideModel, TestNow, "");
-            var (labelMinX, labelMaxX) = GrayInkX(pxWide, surface.Width, surface.Height, 0, 70, plotTopScan);
-            var (curveMinX, _) = MinMaxAccentX(pxWide, surface.Width, surface.Height, plotTopScan, surface.Height);
+            var (labelMinX, labelMaxX) = ScanX(pxWide, surface.Width, surface.Height, 0, 70,
+                plotTopScan, surface.Height, GrayAt);
+            var (curveMinX, _) = ScanX(pxWide, surface.Width, surface.Height, 0, surface.Width,
+                plotTopScan, surface.Height, IsAccent);
             Check(labelMaxX > 0 && curveMinX > 0 && curveMinX - labelMaxX >= 6,
                 "byte labels stay clear of the curve",
                 $"label ink ends at x={labelMaxX}, curve starts at x={curveMinX} (need >= 6px clear)");
@@ -1352,7 +1349,7 @@ public static class SelfTest
                                 Frame(TestNow, 1f / 60f);
                                 Frame(TestNow + 1.0 / 60.0, 1f / 60f);
                                 var lockPx = hw.Surface.CaptureToPixels(fhost.Device);
-                                var locked = Elements(lockPx, cardW, cardH);
+                                var locked = InkRuns(lockPx, cardW, cardH, 6, 32);
                                 Check(locked.Count == 2, "locked row draws the title and the value, nothing else",
                                     $"{locked.Count} element(s): {Runs(locked)}");
                                 if (locked.Count == 2)
@@ -1371,7 +1368,7 @@ public static class SelfTest
                                 for (int f = 0; f < 8; f++) Frame(TestNow + 0.2 + f * 0.05, 0.05f);
                                 for (int f = 0; f < 2; f++) Frame(TestNow + 0.6 + f / 60.0, 1f / 60f);
                                 var px = hw.Surface.CaptureToPixels(fhost.Device);
-                                var e = Elements(px, cardW, cardH);
+                                var e = InkRuns(px, cardW, cardH, 6, 32);
                                 // X, chip, '<', title, '>', value, check.
                                 Check(e.Count == 7, "edit row draws exactly its seven ink elements",
                                     $"{e.Count} element(s): {Runs(e)}");
@@ -1387,7 +1384,7 @@ public static class SelfTest
                                     // Scanned over the whole axis: the column's left edge
                                     // belongs to its widest tick, not to the short one that
                                     // happens to sit at the bottom.
-                                    var (colInk, _) = GrayInkX(px, cardW, cardH, 0, cardW, 50);
+                                    var (colInk, _) = ScanX(px, cardW, cardH, 0, cardW, 50, cardH, GrayAt);
                                     Check(Math.Abs(e[0].Left - colInk) <= 2,
                                         "X badge ink starts on the tick values' left edge",
                                         $"X ink starts {e[0].Left}, tick ink starts {colInk}");
@@ -1730,7 +1727,7 @@ public static class SelfTest
                         int engines = 0, adapters = 0;
                         string detail;
                         double util = 0;
-                        _telemetryRead(tel, () =>
+                        tel.Read(() =>
                         {
                             engines = g.EngineSnapshot().Length;
                             adapters = g.AdapterSnapshot().Length;
@@ -1821,11 +1818,19 @@ public static class SelfTest
     // Enough samples to cover the window plus headroom: 70s at 0.25s = 281.
     const int SeedCount = 281;
 
-    /// <summary>Reads the sampler's current snapshot under the telemetry lock.</summary>
-    static void _telemetryRead(Metrics.Telemetry tel, Action reader) => tel.Read(reader);
-
     static void Seed(TimeSeries s, int n, double endT)
         => Seed(s, n, endT, 0);
+
+    /// <summary>Shared t0-step-Add skeleton behind Seed and SeedBytes.</summary>
+    static void SeedWave(TimeSeries s, int n, double endT, Func<double, double> wave)
+    {
+        double t0 = endT - (n - 1) * SeedStep;
+        for (int i = 0; i < n; i++)
+        {
+            double t = t0 + i * SeedStep;
+            s.Add(t, (float)wave(t));
+        }
+    }
 
     /// <summary>
     /// Seeds a series with its own waveform (per-series phase + harmonic).
@@ -1838,15 +1843,9 @@ public static class SelfTest
         double rate = 0.30 + 0.010 * (seriesIndex % 9);   // <= 0.38 rad/s, ~0.06 Hz
         double amp = 26 + 3 * (seriesIndex % 6);
         double bias = (seriesIndex % 5) * 4.0 - 8.0;
-        double t0 = endT - (n - 1) * SeedStep;
-        for (int i = 0; i < n; i++)
-        {
-            double t = t0 + i * SeedStep;
-            double v = 46 + bias
-                     + amp * Math.Sin((t + phase) * rate)
-                     + amp * 0.35 * Math.Cos((t + phase) * rate * 0.37);
-            s.Add(t, (float)Math.Clamp(v, 0, 100));
-        }
+        SeedWave(s, n, endT, t => Math.Clamp(46 + bias
+                 + amp * Math.Sin((t + phase) * rate)
+                 + amp * 0.35 * Math.Cos((t + phase) * rate * 0.37), 0.0, 100.0));
     }
 
     /// <summary>
@@ -1895,51 +1894,41 @@ public static class SelfTest
         return n;
     }
 
-    /// <summary>Min/max column holding an accent pixel inside a y band; (-1,-1) when absent.</summary>
-    static (int minX, int maxX) MinMaxAccentX(byte[] px, int w, int h, int yLo, int yHi)
-    {
-        int minX = int.MaxValue, maxX = -1;
-        for (int y = Math.Max(0, yLo); y < Math.Min(h, yHi); y++)
-            for (int x = 0; x < w; x++)
-                if (IsAccent(px, (y * w + x) * 4)) { if (x < minX) minX = x; if (x > maxX) maxX = x; }
-        return maxX < 0 ? (-1, -1) : (minX, maxX);
-    }
-
     /// <summary>
-    /// Min/max column holding a dim gray (axis-label) pixel inside a box; (-1,-1) when
-    /// absent. Axis text is white at 34% over the dark panel, so it reads as gray.
+    /// Min/max column holding a matching pixel in a box; (-1,-1) when absent. The one
+    /// scan behind the accent, dim-gray-label and hover-white min/max probes, which
+    /// differed only in the pixel predicate.
     /// </summary>
-    static (int minX, int maxX) GrayInkX(byte[] px, int w, int h, int xLo, int xHi, int yLo)
-    {
-        int minX = int.MaxValue, maxX = -1;
-        for (int y = Math.Max(0, yLo); y < h; y++)
-            for (int x = Math.Max(0, xLo); x < Math.Min(w, xHi); x++)
-            {
-                int i = (y * w + x) * 4;
-                byte b = px[i], g = px[i + 1], r = px[i + 2], a = px[i + 3];
-                int lo = Math.Min(b, Math.Min(g, r)), hi = Math.Max(b, Math.Max(g, r));
-                if (a > 100 && hi - lo <= 14 && hi >= 45) { if (x < minX) minX = x; if (x > maxX) maxX = x; }
-            }
-        return maxX < 0 ? (-1, -1) : (minX, maxX);
-    }
-
-    /// <summary>
-    /// Min/max column holding a full-brightness white (badge glyph at hover) pixel inside
-    /// a box; (-1,-1) when absent. Only the hover-brightened badge reaches 200+, so the
-    /// header text and axis labels cannot be mistaken for it.
-    /// </summary>
-    static (int minX, int maxX) BrightInkX(byte[] px, int w, int h, int xLo, int xHi, int yLo, int yHi)
+    static (int minX, int maxX) ScanX(byte[] px, int w, int h, int xLo, int xHi, int yLo, int yHi,
+        Func<byte[], int, bool> at)
     {
         int minX = int.MaxValue, maxX = -1;
         for (int y = Math.Max(0, yLo); y < Math.Min(h, yHi); y++)
             for (int x = Math.Max(0, xLo); x < Math.Min(w, xHi); x++)
             {
                 int i = (y * w + x) * 4;
-                if (px[i + 3] > 200 && px[i + 2] > 200 && px[i + 1] > 200 && px[i] > 200)
-                { if (x < minX) minX = x; if (x > maxX) maxX = x; }
+                if (at(px, i)) { if (x < minX) minX = x; if (x > maxX) maxX = x; }
             }
         return maxX < 0 ? (-1, -1) : (minX, maxX);
     }
+
+    /// <summary>
+    /// Dim gray (axis-label) pixel: axis text is white at 34% over the dark panel,
+    /// so it reads as gray.
+    /// </summary>
+    static bool GrayAt(byte[] px, int i)
+    {
+        byte b = px[i], g = px[i + 1], r = px[i + 2], a = px[i + 3];
+        int lo = Math.Min(b, Math.Min(g, r)), hi = Math.Max(b, Math.Max(g, r));
+        return a > 100 && hi - lo <= 14 && hi >= 45;
+    }
+
+    /// <summary>
+    /// Full-brightness white (badge glyph at hover) pixel. Only the hover-brightened
+    /// badge reaches 200+, so header text and axis labels cannot match it.
+    /// </summary>
+    static bool BrightAt(byte[] px, int i)
+        => px[i + 3] > 200 && px[i + 2] > 200 && px[i + 1] > 200 && px[i] > 200;
 
     /// <summary>
     /// One horizontal run of header ink: (first column, last column). Measured out of
@@ -1991,9 +1980,12 @@ public static class SelfTest
 
     /// <summary>
     /// Column runs of header ink in a horizontal band, merging gaps under
-    /// <paramref name="merge"/> px so anti-aliasing cannot split one glyph in two.
+    /// <paramref name="merge"/> px so anti-aliasing cannot split one glyph in two,
+    /// then joining runs across gaps under <paramref name="minGap"/> so one word
+    /// split by its own letter spacing stays one element (design.md 12).
     /// </summary>
-    static List<InkRun> InkRuns(byte[] px, int w, int h, int yLo, int yHi, int merge = 2)
+    static List<InkRun> InkRuns(byte[] px, int w, int h, int yLo, int yHi, int merge = 2,
+        float minGap = HeaderLayout.GapText)
     {
         var runs = new List<InkRun>();
         int start = -1, last = -1;
@@ -2008,16 +2000,6 @@ public static class SelfTest
             else { runs.Add(new InkRun(start, last)); start = last = x; }
         }
         if (start >= 0) runs.Add(new InkRun(start, last));
-        return runs;
-    }
-
-    /// <summary>
-    /// Ink runs joined into elements: a gap at least <c>minGap</c> starts a new element,
-    /// so one word split by its own letter spacing stays one element (design.md 12).
-    /// </summary>
-    static List<InkRun> Elements(byte[] px, int w, int h, float minGap = HeaderLayout.GapText)
-    {
-        var runs = InkRuns(px, w, h, 6, 32);
         if (minGap <= 0 || runs.Count < 2) return runs;
         int gap = (int)minGap;
         var merged = new List<InkRun>();
@@ -2059,10 +2041,8 @@ public static class SelfTest
         {
             for (int x = 0; x < w; x++)
             {
-                int i = (y * w + x) * 4;
                 // Back buffer is B8G8R8A8 premultiplied; accent (0.298, 0.761, 1.0) -> B=255 G=194 R=76.
-                byte b = px[i], g = px[i + 1], r = px[i + 2], a = px[i + 3];
-                if (a > 200 && b > 190 && g > 150 && g < 235 && r > 30 && r < 130)
+                if (IsAccent(px, (y * w + x) * 4))
                 {
                     if (!seen[y]) { seen[y] = true; rows++; }
                     break;
@@ -2139,12 +2119,12 @@ public static class SelfTest
         for (int i = 0; i < count; i++)
         {
             float hue = (i * 0.6180339887f) % 1f;   // golden-ratio stepping, maximises spread
-            var (r, g, b) = HsvToRgb(hue, 0.62f, 1f);
+            var (r, g, b) = new Hsv(hue * 360.0, 0.62, 1.0).ToRgb();
             list.Add(new ChartSeries
             {
                 Name = "Core " + i,
                 Data = new TimeSeries(),
-                Color = new Vortice.Mathematics.Color4(r, g, b, 0.85f),
+                Color = new Vortice.Mathematics.Color4(r / 255f, g / 255f, b / 255f, 0.85f),
                 Secondary = true,
             });
         }
@@ -2161,34 +2141,12 @@ public static class SelfTest
         };
     }
 
-    static (float r, float g, float b) HsvToRgb(float h, float s, float v)
-    {
-        int i = (int)(h * 6f);
-        float f = h * 6f - i;
-        float p = v * (1f - s), q = v * (1f - f * s), t = v * (1f - (1f - f) * s);
-        return (i % 6) switch
-        {
-            0 => (v, t, p),
-            1 => (q, v, p),
-            2 => (p, v, t),
-            3 => (p, q, v),
-            4 => (t, p, v),
-            _ => (v, p, q),
-        };
-    }
-
     /// <summary>Seeds a series in BYTES to match the 32 GB stacked-memory axis.</summary>
     static void SeedBytes(TimeSeries s, int n, double endT, int seriesIndex, double gib)
     {
         const double G = 1073741824.0;
         double phase = seriesIndex * 1.7;
-        double t0 = endT - (n - 1) * SeedStep;
-        for (int i = 0; i < n; i++)
-        {
-            double t = t0 + i * SeedStep;
-            double v = gib * G * (0.90 + 0.10 * Math.Sin((t + phase) * 0.05));
-            s.Add(t, (float)v);
-        }
+        SeedWave(s, n, endT, t => gib * G * (0.90 + 0.10 * Math.Sin((t + phase) * 0.05)));
     }
 
     static ChartModel BuildStackedModel(int w, int h) => new()

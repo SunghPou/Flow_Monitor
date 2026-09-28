@@ -51,18 +51,10 @@ to a box would leave the glyph visibly short of the line it is meant to sit on.
 
 ### Why the header was wrong repeatedly, and what changed
 
-The layout was computed in **two** places per frame — `ChartRenderer.Draw` for the
-text and `WidgetWindow.RenderFrameCore` for the hit boxes — each measuring its own
-text width, while the ink extents lived in a third place, a hand-fitted formula
-(`WidgetPainter.BadgeGlyphHalf = size*Ink*Arm + stroke/2`) that the painters
-themselves did not draw to. So the layout reserved ink the painters never painted
-and painted ink the layout never reserved, and each of the three could drift.
-`FitValue` made it worse: the layout reserved the *full* value width and the
-painter drew a *shortened* one, so ink and hit box disagreed by construction.
-
-On top of that, the tests asserted the same formula the code used. An assert that
-re-derives the number it just computed passes even when both are wrong, which is
-exactly how a mirrored constant ended up 7px out and a column 8px out.
+The layout was computed in two places per frame, each measuring its own text
+width, while the ink extents lived in a hand-fitted formula the painters did not
+draw to — and the tests re-derived the same formula, so both could be wrong
+together (a mirrored constant ended up 7px out, a column 8px out).
 
 Process rules, from here on:
 
