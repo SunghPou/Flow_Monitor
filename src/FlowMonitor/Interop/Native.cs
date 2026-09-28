@@ -473,5 +473,9 @@ internal static class Native
     public const uint WS_EX_TOPMOST = 0x00000008;
     public const int WM_CANCELMODE = 0x001F;
     public const int VK_ESCAPE = 0x1B;
+
+    /// <summary>Polls a key without focus; the high bit is set while it is down.</summary>
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    public static extern short GetAsyncKeyState(int vKey);
     public const int VK_RETURN = 0x0D;
 }

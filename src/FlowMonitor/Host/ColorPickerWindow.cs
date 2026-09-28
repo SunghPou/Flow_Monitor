@@ -46,6 +46,9 @@ internal static class ColorPickerWindow
     static bool _up;
     /// <summary>A desktop pick is in flight: the click belongs to the eyedropper.</summary>
     static bool _picking;
+    static bool _done;                 // the pick loop's exit flag
+    const IntPtr PickTimerId = 2;
+    const uint PickTimerMs = 16;
 
     /// <summary>Wheel notch size for the value component (Blender's colorpicker_wheel_cb).</summary>
     const double WheelStep = 0.05;
@@ -86,6 +89,7 @@ internal static class ColorPickerWindow
 
                 case Native.WM_TIMER:
                     if (wParam == 1) OnFrame();
+                    else if (wParam == PickTimerId) OnPickTimer();
                     return new IntPtr(0);
 
                 case Native.WM_LBUTTONDOWN:
@@ -313,8 +317,9 @@ internal static class ColorPickerWindow
 
     static void Down(IntPtr lParam)
     {
-        // While sampling the desktop the click belongs to the eyedropper, not the card.
-        if (_picking) { FinishPick(); return; }
+        // While sampling the desktop the click belongs to the eyedropper, and it is
+        // caught by the system-wide hook; a click on the card itself is a plain miss.
+        if (_picking) return;
 
         var (x, y) = ToLogical(lParam);
         var part = Picker.HitTest(x, y);
@@ -402,34 +407,39 @@ internal static class ColorPickerWindow
 
     /// <summary>
     /// Hands the desktop to the user: the card steps aside, the pipette cursor follows
-    /// the mouse anywhere, the next click samples that pixel, Esc cancels. The window
-    /// KEEPS the mouse capture, so every move and the click come back here even though
-    /// the cursor is over some other window; that is what makes the pipette cursor and
-    /// the sample land where the user aimed. A poll loop could do neither: it starved
-    /// the message pump, so Windows reset the cursor and the click was lost.
+    /// the mouse anywhere, the next click samples that pixel, Esc cancels. The click is
+    /// caught by a system-wide hook, not by a window message - the card is hidden and
+    /// the click lands on another window on another thread, so it never reaches this
+    /// thread's queue. A timer re-asserts the cursor, because every window under the
+    /// mouse sets its own on each move, and watches for Esc, which arrives no other way
+    /// once the card no longer holds focus.
     /// </summary>
     static void PickScreen()
     {
         _picking = true;
         Native.ShowWindow(_hwnd, 0 /* SW_HIDE */);
+        Interop.GlobalMouseHook.Clicked += OnPicked;
+        Interop.GlobalMouseHook.Install();
         try
         {
             Native.GetCursorPos(out _);
             Native.SetCursor(Interop.EyedropperCursor.Handle);
-            while (true)
+            Native.SetTimer(_hwnd, PickTimerId, PickTimerMs, IntPtr.Zero);
+            while (!_done)
             {
                 int r = Native.GetMessageW(out var msg, IntPtr.Zero, 0, 0);
                 if (r <= 0) break;
-                if (msg.message == Native.WM_LBUTTONDOWN) { FinishPick(); break; }
-                if (msg.message == Native.WM_KEYDOWN
-                    && (msg.wParam.ToInt64() & 0xFFFF) == Native.VK_ESCAPE) { _cancelled = true; _picking = false; break; }
                 Native.TranslateMessage(ref msg);
                 Native.DispatchMessageW(ref msg);
             }
         }
         finally
         {
+            Native.KillTimer(_hwnd, PickTimerId);
+            Interop.GlobalMouseHook.Clicked -= OnPicked;
+            Interop.GlobalMouseHook.Remove();
             _picking = false;
+            _done = false;
             Interop.EyedropperCursor.Apply(false);
         }
         if (_hwnd == IntPtr.Zero) return;               // the pick loop tore the card down
@@ -439,16 +449,19 @@ internal static class ColorPickerWindow
         Paint();
     }
 
-    /// <summary>Samples the pixel under the mouse and returns it to the card.</summary>
-    static void FinishPick()
+    /// <summary>Runs on our thread inside our own pump, with the click's screen coordinates.</summary>
+    static void OnPicked(int x, int y)
     {
-        Native.GetCursorPos(out var at);
-        var picked = Interop.ScreenPick.SampleAt(at.X, at.Y);
-        if (picked is Rgba rgb)
-        {
-            _hsv = rgb.ToHsv();
-            NotifyChanged();
-        }
+        var rgb = Interop.ScreenPick.SampleAt(x, y);
+        if (rgb is Rgba picked) { _hsv = picked.ToHsv(); NotifyChanged(); }
+        _done = true;
+    }
+
+    /// <summary>Pushes the pipette cursor back and watches for Esc while the desktop is ours.</summary>
+    static void OnPickTimer()
+    {
+        Interop.EyedropperCursor.Apply(true);
+        if ((Native.GetAsyncKeyState(Native.VK_ESCAPE) & 0x8000) != 0) { _cancelled = true; _done = true; }
     }
 
     // ------------------------------------------------------------------ paint
