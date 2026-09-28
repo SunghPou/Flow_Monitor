@@ -351,12 +351,15 @@ public static class EyedropperCursor
                 g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
                 g.Clear(Color.Transparent);
                 using var path = BuildPath();
-                g.FillPath(Brushes.White, path);
-                using var pen = new Pen(Color.Black, 1.0f)
+                // Halo behind the fill, not a centered stroke: the white interior
+                // stays pixel-identical to the button icon, and only a dark rim
+                // outside the silhouette keeps it readable on light backgrounds.
+                using var halo = new Pen(Color.Black, 2f)
                 {
                     LineJoin = System.Drawing.Drawing2D.LineJoin.Round,
                 };
-                g.DrawPath(pen, path);
+                g.DrawPath(halo, path);
+                g.FillPath(Brushes.White, path);
             }
             var data = bmp.LockBits(new Rectangle(0, 0, Size, Size),
                 System.Drawing.Imaging.ImageLockMode.ReadOnly,
