@@ -316,8 +316,7 @@ public sealed class WidgetWindow
             _checkHoverTarget = ck; _closeHoverTarget = cl; _chipHoverTarget = ch;
             RequestRedraw();
         }
-        if (_dragging) OnDragMove(x, y);
-        else if (_resizing) OnDragMove(x, y);
+        if (_dragging || _resizing) OnDragMove(x, y);
         else UpdateCursorForPosition(x, y);
     }
 
@@ -503,11 +502,11 @@ public sealed class WidgetWindow
     {
         float d = Config.Dpi;
         var r = _chipRect;
-        GetClientRect(Handle, out var client);
+        Native.GetClientRect(Handle, out var client);
         int sx = (int)(r.Left * d) - (int)(r.Width * d * 0.5f);
         int sy = (int)((r.Top + r.Height) * d) + 8;
         var screen = new Native.POINT(sx, sy);
-        ClientToScreen(Handle, ref screen);
+        Native.ClientToScreen(Handle, ref screen);
         string start = Config.LineColorFor(Config.Graph);
         // Live preview: every drag change repaints this widget with the new colour
         // (unsaved). Commit writes the config; cancel puts the original back.
@@ -525,10 +524,6 @@ public sealed class WidgetWindow
         Config.SetLineColor(Config.Graph, picked);
         _host.OnWidgetConfigChanged(this, livePreview: false);
     }
-
-    static void GetClientRect(IntPtr h, out RECT r) => Native.GetClientRect(h, out r);
-
-    static void ClientToScreen(IntPtr h, ref POINT p) => Native.ClientToScreen(h, ref p);
 
     bool IsInColorChip(int x, int y)
     {
