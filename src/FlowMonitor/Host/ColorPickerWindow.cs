@@ -37,6 +37,11 @@ internal static class ColorPickerWindow
     static PickerSpace _space = PickerSpace.Perceptual;
     static PickerModel _model = PickerModel.Rgb;
     static PickerPart _drag = PickerPart.None;
+
+    /// <summary>Frame timer cadence: one paint and one live-preview push per refresh.</summary>
+    const uint FrameMs = 16;
+    static bool _dirty, _pushDirty, _timerOn;
+    static long _paintTicks; static int _paintFrames;
     static bool _cancelled;
     static bool _up;
     /// <summary>A desktop pick is in flight: the click belongs to the eyedropper.</summary>
@@ -75,7 +80,12 @@ internal static class ColorPickerWindow
                     // WM_SETCURSOR carries screen coordinates, so the last client
                     // position is tracked here and read back for the cursor shape.
                     _mouse = ToLogical(lParam);
-                    if (_drag != PickerPart.None) { Apply(lParam); Paint(); }
+                    // Apply on every move, repaint on the frame timer.
+                    if (_drag != PickerPart.None) Apply(lParam);
+                    return new IntPtr(0);
+
+                case Native.WM_TIMER:
+                    if (wParam == 1) OnFrame();
                     return new IntPtr(0);
 
                 case Native.WM_LBUTTONDOWN:
@@ -160,8 +170,45 @@ internal static class ColorPickerWindow
         return Current().ToHex();
     }
 
-    /// <summary>Live preview: the owner widget repaints with this colour, unsaved.</summary>
-    static void NotifyChanged() => _onChanged?.Invoke(Current().ToHexWithAlpha());
+    /// <summary>
+    /// Marks the card and the live preview dirty and arms the frame timer. Mouse moves
+    /// arrive faster than the display refreshes, and each repaint of the card and of the
+    /// owner widget is serialised on one GPU lock, so doing the work per move drops
+    /// frames. One paint and one preview push per frame is all the eye can show.
+    /// </summary>
+    static void NotifyChanged()
+    {
+        _dirty = true;
+        _pushDirty = true;
+        if (_timerOn || _hwnd == IntPtr.Zero) return;
+        _timerOn = true;
+        Native.SetTimer(_hwnd, 1, FrameMs, IntPtr.Zero);
+    }
+
+    /// <summary>Renders the pending frame: preview push first, then one card paint.</summary>
+    static void OnFrame()
+    {
+        Native.KillTimer(_hwnd, 1);
+        _timerOn = false;
+        if (_pushDirty)
+        {
+            _pushDirty = false;
+            _onChanged?.Invoke(Current().ToHexWithAlpha());
+        }
+        if (!_dirty) return;
+        _dirty = false;
+        long t0 = System.Diagnostics.Stopwatch.GetTimestamp();
+        Paint();
+        _paintTicks += System.Diagnostics.Stopwatch.GetTimestamp() - t0;
+        if (++_paintFrames >= 60)
+        {
+            // One line per second of dragging: the number that says whether a drag
+            // keeps up with the display or is dropping frames.
+            Log.Info($"picker: card paint {_paintTicks / _paintFrames * 1000.0 / System.Diagnostics.Stopwatch.Frequency:0.0} ms/frame over {_paintFrames} frames");
+            _paintTicks = 0;
+            _paintFrames = 0;
+        }
+    }
 
     /// <summary>The picked colour in sRGB, which is the space the chart stores.</summary>
     static Rgba Current()
