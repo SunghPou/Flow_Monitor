@@ -157,7 +157,10 @@ public static class GlyphGeometry
         };
         Cap(pts, spine[2], n1, d1, Bar);       // cap on the long arm
         pts.Add(spine[1] - mid * Bar * scale); // inner corner at the elbow
-        Cap(pts, spine[0], n0, -d0, Bar);      // cap on the short arm
+        // Cap on the short arm. n0 is flipped so the walk starts on the arm's INNER end
+        // corner (the one the contour reaches from the inner elbow) and closes back on the
+        // outer one; walking it the other way crosses the contour and drops a detached nub.
+        Cap(pts, spine[0], -n0, -d0, Bar);
         Emit(c, half, 0f, pts);
     }
 
