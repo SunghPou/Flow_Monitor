@@ -47,10 +47,8 @@ internal static class ColorPickerWindow
     /// <summary>A desktop pick is in flight: the click belongs to the eyedropper.</summary>
     static bool _picking;
     static bool _done;                 // the pick loop's exit flag
-    const IntPtr PickTimerId = 2;
-    const uint PickTimerMs = 10;
-    static bool _wasDown;
-    static int _pickTicks;
+    static IntPtr _overlayHwnd;
+    static WidgetSurface? _overlaySurface;
 
     /// <summary>Wheel notch size for the value component (Blender's colorpicker_wheel_cb).</summary>
     const double WheelStep = 0.05;
@@ -68,6 +66,8 @@ internal static class ColorPickerWindow
     {
         try
         {
+            // The pick overlay answers its own input; the card never sees it.
+            if (hwnd == _overlayHwnd) return OverlayProc(hwnd, msg, wParam, lParam);
             switch (msg)
             {
                 case Native.WM_NCCREATE:
@@ -91,7 +91,6 @@ internal static class ColorPickerWindow
 
                 case Native.WM_TIMER:
                     if (wParam == 1) OnFrame();
-                    else if (wParam == PickTimerId) OnPickTimer();
                     return new IntPtr(0);
 
                 case Native.WM_LBUTTONDOWN:
@@ -119,12 +118,6 @@ internal static class ColorPickerWindow
 
                 case Native.WM_CANCELMODE:
                     Close();
-                    return new IntPtr(0);
-
-                case Native.WM_CAPTURECHANGED:
-                    // Another window took the capture: the pick is over, without
-                    // re-capturing, which would fight the new owner.
-                    if (_picking) _done = true;
                     return new IntPtr(0);
 
                 case Native.WM_ACTIVATE:
@@ -423,47 +416,63 @@ internal static class ColorPickerWindow
     }
 
     /// <summary>
-    /// Hands the desktop to the user: the card steps aside, the pipette cursor follows
-    /// the mouse anywhere, the next click samples that pixel, Esc cancels. The click is
-    /// caught by a system-wide hook, not by a window message - the card is hidden and
-    /// the click lands on another window on another thread, so it never reaches this
-    /// thread's queue. A timer re-asserts the cursor, because every window under the
-    /// mouse sets its own on each move, and watches for Esc, which arrives no other way
-    /// once the card no longer holds focus.
-    /// </summary>
     /// <summary>
-    /// Desktop pick. The card stays up: hiding it tore down the composition target and
-    /// the WM_ACTIVATE handler closed the popup. Capture plus a fast timer owns the
-    /// cursor: SetCursor lasts only until the next window sets its own, so the timer
-    /// re-asserts the pipette while the button state is polled for the terminating click.
+    /// Desktop pick under a fullscreen transparent overlay. The pointer is always over
+    /// our window, so its WM_SETCURSOR always answers the pipette and no foreign
+    /// window can override it; the terminating click arrives as a real message, so
+    /// there is no capture, no timer and no polling to starve. The card stays up.
     /// </summary>
     static void PickScreen()
     {
+        var host = _host;
+        if (host is null) return;
+        var vs = Desktop.VirtualScreen();
+        int vw = vs.Right - vs.Left, vh = vs.Bottom - vs.Top;
+        _overlayHwnd = Native.CreateWindowExW(
+            Native.WS_EX_TOOLWINDOW | Native.WS_EX_TOPMOST,
+            ClassName, "FlowMonitor PickOverlay",
+            unchecked((uint)(Native.WS_POPUP | Native.WS_CLIPSIBLINGS)),
+            vs.Left, vs.Top, vw, vh,
+            IntPtr.Zero, IntPtr.Zero, Native.GetModuleHandle(null), IntPtr.Zero);
+        if (_overlayHwnd == IntPtr.Zero)
+        {
+            Log.Warn($"eyedropper: overlay failed win32={Marshal.GetLastWin32Error()}");
+            return;
+        }
+        // The card holds the capture for its sliders for its whole modal life; the
+        // overlay needs the mouse messages, so it is released before the pick starts
+        // (and _picking is still false, so no capture-changed handling can misfire).
+        Native.ReleaseCapture();
         _picking = true;
-        _pickTicks = 0;
-        _wasDown = (Native.GetAsyncKeyState(Native.VK_LBUTTON) & 0x8000) != 0;
-        Native.SetCapture(_hwnd);
-        Interop.EyedropperCursor.Apply(true);
-        Log.Info("eyedropper: pick start");
-        if (Native.SetTimer(_hwnd, PickTimerId, PickTimerMs, IntPtr.Zero) == IntPtr.Zero)
-            Log.Warn("eyedropper: SetTimer failed " + Marshal.GetLastWin32Error());
         try
         {
-            while (!_done && _hwnd != IntPtr.Zero)
+            lock (host.Device.GpuLock)
+            {
+                _overlaySurface = new WidgetSurface(host.Device, _overlayHwnd, vw, vh);
+                _overlaySurface.BeginDraw(96f);
+                _overlaySurface.Context.Clear(new Vortice.Mathematics.Color4(0f, 0f, 0f, 0f));
+                _overlaySurface.EndDrawAndPresent();
+            }
+            Log.Info("eyedropper: pick start");
+            Native.ShowWindow(_overlayHwnd, 5);
+            Native.SetForegroundWindow(_overlayHwnd);
+            Interop.EyedropperCursor.Apply(true);
+            while (!_done && Native.IsWindow(_overlayHwnd))
             {
                 int r = Native.GetMessageW(out var msg, IntPtr.Zero, 0, 0);
-                if (r <= 0) break;
+                if (r <= 0) { Log.Info($"eyedropper: pump exit r={r}"); break; }
                 Native.TranslateMessage(ref msg);
                 Native.DispatchMessageW(ref msg);
-                // Windows re-asserts the cursor of whatever window the pointer is over on
-                // every move, so the pipette is pushed back after each dispatch.
-                Interop.EyedropperCursor.Apply(true);
             }
+            Log.Info($"eyedropper: loop exit done={_done}");
         }
         finally
         {
-            Native.KillTimer(_hwnd, PickTimerId);
-            Native.ReleaseCapture();
+            try { lock (host.Device.GpuLock) { _overlaySurface?.Dispose(); } }
+            catch (Exception ex) { Log.Warn("eyedropper: overlay dispose: " + ex.Message); }
+            _overlaySurface = null;
+            try { if (Native.IsWindow(_overlayHwnd)) Native.DestroyWindow(_overlayHwnd); } catch { }
+            _overlayHwnd = IntPtr.Zero;
             _picking = false;
             _done = false;
             Interop.EyedropperCursor.Apply(false);
@@ -473,6 +482,29 @@ internal static class ColorPickerWindow
         Native.SetForegroundWindow(_hwnd);
         Native.SetCapture(_hwnd);
         Paint();
+    }
+
+    /// <summary>Input for the pick overlay: pipette cursor, click samples, Esc cancels.</summary>
+    internal static IntPtr OverlayProc(IntPtr hwnd, uint msg, IntPtr wParam, IntPtr lParam)
+    {
+        switch (msg)
+        {
+            case Native.WM_SETCURSOR:
+                Interop.EyedropperCursor.Apply(true);
+                return new IntPtr(1);
+            case Native.WM_LBUTTONDOWN:
+                Native.GetCursorPos(out var at);
+                OnPicked(at.X, at.Y);
+                return new IntPtr(0);
+            case Native.WM_RBUTTONDOWN:
+                _cancelled = true;
+                _done = true;
+                return new IntPtr(0);
+            case Native.WM_KEYDOWN:
+                if ((wParam.ToInt64() & 0xFFFF) == Native.VK_ESCAPE) { _cancelled = true; _done = true; }
+                return new IntPtr(0);
+        }
+        return Native.DefWindowProcW(hwnd, msg, wParam, lParam);
     }
 
     /// <summary>Runs on our thread inside our own pump, with the click's screen coordinates.</summary>
@@ -489,25 +521,6 @@ internal static class ColorPickerWindow
             Log.Info($"eyedropper: picked {picked.ToHex()} at ({x},{y})");
         }
         _done = true;
-    }
-
-    /// <summary>
-    /// The 10ms pick tick: the pipette is re-asserted (SetCursor lasts only until the
-    /// next window sets its own), Esc cancels, and the terminating click never reaches
-    /// our window, so its rising edge is polled and sampled at the cursor position.
-    /// </summary>
-    static void OnPickTimer()
-    {
-        if (++_pickTicks == 1) Log.Info("eyedropper: first tick");
-        Interop.EyedropperCursor.Apply(true);
-        if ((Native.GetAsyncKeyState(Native.VK_ESCAPE) & 0x8000) != 0) { _cancelled = true; _done = true; return; }
-        bool down = (Native.GetAsyncKeyState(Native.VK_LBUTTON) & 0x8000) != 0;
-        if (down && !_wasDown)
-        {
-            Native.GetCursorPos(out var at);
-            OnPicked(at.X, at.Y);
-        }
-        _wasDown = down;
     }
 
     // ------------------------------------------------------------------ paint

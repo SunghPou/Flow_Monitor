@@ -383,6 +383,23 @@ internal static class Native
     [DllImport("user32.dll", SetLastError = true)]
     public static extern IntPtr SetCursor(IntPtr hCursor);
 
+    public const int CURSOR_SHOWING = 0x00000001;
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct CURSORINFO
+    {
+        public int cbSize;
+        public int flags;
+        public IntPtr hCursor;
+        // Screen position as two plain ints: Native.POINT carries a second point and
+        // would make this struct 32 bytes instead of the required 24.
+        public int ptX, ptY;
+    }
+
+    /// <summary>Reads back the cursor Windows is actually showing, if any.</summary>
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern bool GetCursorInfo(ref CURSORINFO pci);
+
     [DllImport("user32.dll", SetLastError = true)]
     public static extern bool InvalidateRect(IntPtr hWnd, IntPtr lpRect, bool bErase);
 

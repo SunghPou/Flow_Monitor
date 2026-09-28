@@ -85,6 +85,9 @@ public static class EyedropperCursor
     static IntPtr Build()
     {
         // One 1bpp DIB holding both masks: the XOR plane on top, the AND plane below.
+        // The section is kept alive for the life of the process: whether the system
+        // copies the planes on CreateCursor is undocumented, and freeing them leaves
+        // a cursor SetCursor silently refuses.
         var info = new BITMAPINFO
         {
             bmiHeader = new BITMAPINFOHEADER
@@ -125,12 +128,17 @@ public static class EyedropperCursor
         }
         finally
         {
+            // The cursor may still reference the section bits: the section stays mapped
+            // until the process exits, so only the device context is released here.
             if (cursor == IntPtr.Zero && bmp != IntPtr.Zero) DeleteObject(bmp);
-            else if (bmp != IntPtr.Zero) DeleteObject(bmp);   // the cursor copies the masks
+            else if (bmp != IntPtr.Zero) _keptBmp = bmp;
             DeleteDC(dc);
         }
         return cursor;
     }
+
+    /// <summary>Pins the DIB section behind the live cursor; never freed.</summary>
+    static IntPtr _keptBmp;
 
     /// <summary>
     /// Monochrome cursor planes: the XOR bit is the ink (white), the AND bit marks

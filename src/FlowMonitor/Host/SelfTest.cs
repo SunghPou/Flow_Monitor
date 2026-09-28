@@ -834,6 +834,16 @@ public static class SelfTest
                 Check(Interop.EyedropperCursor.Handle != IntPtr.Zero, "eyedropper cursor handle builds",
                     $"handle=0x{Interop.EyedropperCursor.Handle.ToInt64():X}");
 
+                // The overlay owns the cursor for the pick: the pointer is always over
+                // our window, so its WM_SETCURSOR is the whole mechanism. A global
+                // readback would race any live mouse move, so the assert calls the
+                // procedure directly: it must answer 1 (cursor set, stop here).
+                Check(ColorPickerWindow.OverlayProc(IntPtr.Zero, Native.WM_SETCURSOR,
+                        IntPtr.Zero, IntPtr.Zero) == new IntPtr(1),
+                    "pick overlay answers the pipette cursor",
+                    "OverlayProc(WM_SETCURSOR) must return 1 after applying the pipette");
+                Interop.EyedropperCursor.Apply(false);
+
                 // The header is the whole upper band: every element takes its y from one
                 // centre, the middle of the space between the top edge and the first line.
                 float band = HeaderLayout.RowCenterFor(50f);
