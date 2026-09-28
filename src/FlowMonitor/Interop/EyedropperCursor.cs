@@ -19,9 +19,10 @@ public static class EyedropperCursor
     /// <summary>Shows the pipette over the dropper field, or the system arrow elsewhere.</summary>
     public static void Apply(bool over)
     {
-        if (!over) { Native.SetCursor(IntPtr.Zero); return; }
-        var h = Handle;
-        Native.SetCursor(h == IntPtr.Zero ? LoadArrow() : h);
+        // SetCursor(NULL) does NOT restore the arrow: it removes the cursor from the
+        // screen, so every non-dropper WM_SETCURSOR hid the pointer over the card.
+        var h = over ? Handle : IntPtr.Zero;
+        Native.SetCursor(h != IntPtr.Zero ? h : LoadArrow());
     }
 
     static IntPtr LoadArrow()
