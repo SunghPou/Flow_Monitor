@@ -457,12 +457,14 @@ internal static class ColorPickerWindow
     /// Offscreen render for the selftest sheet: the live path is <see cref="Paint"/>,
     /// which reads the same statics this sets.
     /// </summary>
-    internal static void PaintTo(WidgetSurface surface, ResourceCache res, float scale, Hsv hsv)
+    internal static void PaintTo(WidgetSurface surface, ResourceCache res, float scale, Hsv hsv,
+        IRenderHost? host = null)
     {
         _surface = surface;
         _res = res;
         _scale = scale;
         _hsv = hsv;
+        _host = host;
         Paint();
     }
 
@@ -694,7 +696,12 @@ internal static class ColorPickerWindow
         {
             if (_wheelPx != n)
                 for (int i = 0; i < _wheelBmp.Length; i++) { _wheelBmp[i]?.Dispose(); _wheelBmp[i] = null; }
-            _wheelBmp[space] = MakeWheel(dc, n, _space);
+            // The shader draws the wheel with a smoothstepped rim; the CPU loop is only
+            // the fallback for a machine where the shader will not build.
+            _wheelBmp[space] = _host is null
+                ? MakeWheel(dc, n, _space)
+                : Rendering.HueWheelTexture.Build(_host.Device, dc, n, _space == PickerSpace.Linear)
+                  ?? MakeWheel(dc, n, _space);
             _wheelPx = n;
         }
     }

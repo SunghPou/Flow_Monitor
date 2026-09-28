@@ -14,7 +14,7 @@ public sealed class ChartSeries
     /// The renderer reads only this, never the live ring.
     /// </summary>
     public float[] Snapshot { get; set; } = Array.Empty<float>();
-    public required Color4 Color { get; init; }
+    public required Color4 Color { get; set; }
     public string Unit { get; init; } = "";
     /// <summary>Draw the gradient area under the line.</summary>
     public bool Fill { get; init; } = true;

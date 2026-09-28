@@ -25,6 +25,8 @@ public sealed class WidgetWindow
     readonly Host.IRenderHost _host;
     WidgetSurface? _surface;
     ChartRenderer? _charts;
+    // Last built model, reused between telemetry ticks; see RenderFrameCore.
+    ChartModel? _model;
     int _width = 1, _height = 1;
 
     // interaction state (UI thread only)
@@ -705,7 +707,13 @@ public sealed class WidgetWindow
 
         if (!_redrawRequested && !chromeAnimating && !_charts.FrameChanged) return false;
 
-        var model = _host.BuildChart(Config, now);
+        // The model's series data only moves when a tick lands, so a live colour preview
+        // must not pay for a telemetry snapshot every frame; half an interval is a safe
+        // staleness bound, and a committed edit asks for a full rebuild below.
+        if (_model is null
+            || now - _model.LastSampleTime >= Math.Max(0.25, _model.SampleIntervalSec * 0.5))
+            _model = _host.BuildChart(Config, now);
+        var model = _host.Retint(Config, _model);
 
         // This frame's header is laid out ONCE here: the boxes stored below drive the
         // hit test, and the same result is handed to the renderer that paints the
@@ -770,6 +778,8 @@ public sealed class WidgetWindow
     {
         cfg.Dpi = Config.Dpi;
         Config = cfg;
+        // A committed edit can change the shape, not just the colour: rebuild.
+        _model = null;
         // Click-through lives in EXSTYLE; push style update immediately.
         ApplyInteractionMode();
         RequestRedraw();

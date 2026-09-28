@@ -98,7 +98,7 @@ public static class SelfTest
                         // so paint twice before capturing.
                         for (int f = 0; f < 2; f++)
                             ColorPickerWindow.PaintTo(pick, resources, 1f,
-                                new Hsv(275, 0.62, 0.86));
+                                new Hsv(275, 0.62, 0.86), new TestRenderHost(device, resources));
                         pick.CaptureToBmp(device, System.IO.Path.Combine(captureDir,
                             light ? "31-picker-light.bmp" : "31-picker-dark.bmp"));
                         Log.Info($"captured picker ({(light ? "light" : "dark")} theme)");
@@ -2139,6 +2139,7 @@ public static class SelfTest
             Snap(m);
             return m;
         }
+        public ChartModel Retint(WidgetConfig cfg, ChartModel model) => model;
         public void OnWidgetGeometryChanged(WidgetWindow w, int x, int y, int width, int height) { }
         public void SetMenuOpen(bool open) { }
         public void ShowContextMenu(WidgetWindow widget, int x, int y) { }

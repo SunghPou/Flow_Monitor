@@ -17,6 +17,8 @@ public interface IRenderHost
     RenderDevice Device { get; }
     ResourceCache Resources { get; }
     ChartModel BuildChart(WidgetConfig cfg, double now);
+    /// <summary>Re-applies the card's line colour to an existing model, in place.</summary>
+    ChartModel Retint(WidgetConfig cfg, ChartModel model);
     void OnWidgetGeometryChanged(WidgetWindow w, int x, int y, int width, int height);
     void SetMenuOpen(bool open);
     void ShowContextMenu(WidgetWindow widget, int x, int y);
@@ -855,6 +857,19 @@ public sealed class DesktopHost : IRenderHost, IDisposable
             }
             model.LastSampleTime = newest;
         });
+        return model;
+    }
+
+    /// <summary>
+    /// Re-applies the card's line colour to an existing model. A colour change is the
+    /// only edit a live preview makes, and the series it drives is secondary or not, so
+    /// the model can be re-tinted in place instead of rebuilt.
+    /// </summary>
+    public ChartModel Retint(WidgetConfig cfg, ChartModel model)
+    {
+        var accent = ParseColor(cfg.LineColorFor(cfg.Graph), ParseColor(cfg.AccentHex, new Color4(0.298f, 0.761f, 1f, 1f)));
+        foreach (var s in model.Series)
+            s.Color = s.Secondary ? new Color4(accent.R, accent.G, accent.B, 0.55f) : accent;
         return model;
     }
 

@@ -21,6 +21,8 @@
   <ItemGroup>
     <PackageReference Include="Vortice.Direct2D1" Version="3.8.3" />
     <PackageReference Include="Vortice.Direct3D11" Version="3.8.3" />
+    <!-- Compiles the HLSL the colour wheel is drawn with; nothing else needs it. -->
+    <PackageReference Include="Vortice.D3DCompiler" Version="3.8.3" />
     <PackageReference Include="Vortice.DXGI" Version="3.8.3" />
     <PackageReference Include="Vortice.DirectComposition" Version="3.8.3" />
   </ItemGroup>
