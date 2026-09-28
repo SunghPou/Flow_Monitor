@@ -144,6 +144,9 @@ internal static class ColorPickerWindow
         _picking = false;
         _drag = PickerPart.None;
         _onChanged = onChanged;
+        // The one place the live path gets its resource cache: Paint reads _res and
+        // nothing else, so the selftest seam and the live window cannot drift.
+        _res = host.Resources;
         _hsv = Rgba.FromHex(startHex).ToHsv();
         _alpha = Rgba.FromHex(startHex).A;
         _space = PickerSpace.Perceptual;
@@ -426,7 +429,7 @@ internal static class ColorPickerWindow
     static void Paint()
     {
         var surface = _surface;
-        var res = _res ?? _host?.Resources;
+        var res = _res;
         if (surface == null || res == null) return;
         // The render thread draws the widgets on the same device; one at a time.
         var gpu = _host?.Device.GpuLock;
@@ -560,9 +563,11 @@ internal static class ColorPickerWindow
             dc.FillRoundedRectangle(new RoundedRectangle(groove, hr, hr), res.Brush(SystemTheme.Field));
             float fill = Picker.XFromSlider(i, t[i]) * s + hr - groove.Left;
             if (fill > 0.5f)
+                // A neutral fill, as the reference card draws it: a channel-tinted one
+                // disappears into the groove as soon as the channel is dark.
                 dc.FillRoundedRectangle(
                     new RoundedRectangle(new RectangleF(groove.Left, groove.Top, fill, groove.Height), hr, hr),
-                    res.Brush(i == 3 ? SystemTheme.MutedInk : Tint(i, c)));
+                    res.Brush(new Color4(SystemTheme.Ink.R, SystemTheme.Ink.G, SystemTheme.Ink.B, 0.45f)));
 
             float hx = Picker.XFromSlider(i, t[i]) * s;
             float d = 7f * s;
@@ -572,18 +577,10 @@ internal static class ColorPickerWindow
                 ? (i == 0 ? c.R.ToString() : i == 1 ? c.G.ToString() : c.B.ToString())
                 : t[i].ToString("0.000");
             var slot = new Rect(row.Right - Picker.ChanValueW * s, row.Y, Picker.ChanValueW * s - 8f * s, row.Height);
-            slot.X = row.Right - _res.Measure(text, fmt, s).Width - 10f * s;   // right-aligned
+            slot.X = row.Right - res.Measure(text, fmt, s).Width - 10f * s;   // right-aligned
             dc.DrawText(text, fmt, slot, res.Brush(SystemTheme.Ink));
         }
     }
-
-    /// <summary>Each RGB groove carries its own channel so the rows read apart at a glance.</summary>
-    static Color4 Tint(int i, Rgba c) => i switch
-    {
-        0 => new(c.R / 255f, 0.42f, 0.42f, 1f),
-        1 => new(0.42f, c.G / 255f, 0.42f, 1f),
-        _ => new(0.42f, 0.42f, c.B / 255f, 1f),
-    };
 
     /// <summary>The hex field with its own label, as the reference card has it. Read-only.</summary>
     static void DrawHex(ID2D1DeviceContext dc, ResourceCache res, float s)
