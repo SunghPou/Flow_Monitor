@@ -151,3 +151,11 @@ background behind a header row is a **row**.
     number typed at the call site.
 23. A selected segment is filled with `Accent`; its text keeps the normal ink so the label
     stays legible on both fills.
+## Icon rules
+
+24. An icon is ONE filled region. Never compose a glyph from overlapping strokes or
+    separate geometries: the fill composites per region, so while the colour carries any
+    alpha (every fade, hover or disabled state) the overlap darkens or brightens against
+    its own arms. Build the glyph as one closed outline - Blender's own SVG path walked
+    into a geometry sink, or a single hand-traced contour - and fill it once. A proof is
+    a pixel scan: no pixel inside a glyph may be brighter than the glyph's own arms.

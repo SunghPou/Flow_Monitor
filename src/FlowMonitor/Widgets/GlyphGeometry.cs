@@ -1,3 +1,4 @@
+using System.Globalization;
 using Vortice.Direct2D1;
 using V2 = System.Numerics.Vector2;
 using Size = Vortice.Mathematics.Size;
@@ -87,36 +88,87 @@ public static class GlyphGeometry
     /// The close X: two equal arms at 45 degrees. `half` is the ink half-extent, so the
     /// cap centre sits at (half - t) along the diagonal.
     /// </summary>
-    public static void X(V2 c, float half, float t)
+
+    public static void X(V2 c, float half)
     {
-        // Cap centres at (half - t) along each diagonal, so the round cap's far edge
-        // lands exactly on `half` in x and y and `half` is the true ink half-extent.
-        float k = half - t;
-        Capsule(new V2(c.X - k, c.Y - k), new V2(c.X + k, c.Y + k), t);
-        Capsule(new V2(c.X - k, c.Y + k), new V2(c.X + k, c.Y - k), t);
+        // A plus rotated 45 degrees, as ONE closed contour. Two capsules would be two
+        // regions: the crossing would composite twice and read brighter than the arms
+        // (docs/design.md icon rule 24). Bar half-width 0.155 of the icon, arm half
+        // length 0.5.
+        const float L = 0.5f, W = 0.155f;
+        Emit(c, half, MathF.PI / 4f,
+        [
+            (L, W), (W, W), (W, L), (-W, L), (-W, W), (-L, W),
+            (-L, -W), (-W, -W), (-W, -L), (W, -L), (W, -W), (L, -W),
+        ]);
     }
 
     /// <summary>
-    /// The confirm tick: a short down-left arm and a longer up-right arm (Blender's
-    /// checkmark), round caps, and the disc at the elbow as the round join.
+    /// The confirm tick as ONE closed contour: a short arm up-left and a longer arm
+    /// up-right, with the notch between them. Two capsules would composite twice at
+    /// the elbow (docs/design.md icon rule 24), so the joint is part of the outline.
     /// </summary>
-    public static void Check(V2 c, float half, float t)
+    public static void Check(V2 c, float half)
     {
-        // Both arms rise from the elbow (the low point) on the diagonals: the short one
-        // up-left, the long one up-right. A + B = 2*(half - t) makes the ink half-extent
-        // exactly `half`, the same reserve the X uses, then the ink is centred on c.
-        const float ShortArm = 0.46f;
-        float a = 2f * (half - t) / (1f + ShortArm);
-        float b = a * ShortArm;
-        var elbow = new V2();
-        var tip = new V2(-b, -b);
-        var end = new V2(a, -a);
-        float minX = -b - t, maxX = a + t;
-        float minY = -a - t, maxY = t;
-        var d = new V2(c.X - (minX + maxX) * 0.5f, c.Y - (minY + maxY) * 0.5f);
-        Capsule(tip + d, elbow + d, t);
-        Capsule(elbow + d, end + d, t);
-        Disc(elbow + d, t, 16);
+        // Spine: short arm up-left, then a longer arm up-right, joined at the elbow.
+        (float X, float Y)[] spine = [(0.02f, 0.50f), (0.36f, 0.90f), (0.98f, 0.16f)];
+        const float Bar = 0.19f;   // half the bar width, in the unit box
+
+        V2 Dir(int i)
+        {
+            var a = new V2(spine[i].X, spine[i].Y);
+            var b = new V2(spine[i + 1].X, spine[i + 1].Y);
+            var d = V2.Normalize(b - a);
+            return new V2(-d.Y, d.X);
+        }
+
+        var n0 = Dir(0);
+        var n1 = Dir(1);
+        // Miter at the elbow so the two bar edges meet in a single corner, which keeps
+        // the outline simple: an overlapping pair would cancel under the even-odd fill.
+        var mid = V2.Normalize(n0 + n1);
+        float scale = 1f / MathF.Max(0.4f, V2.Dot(mid, n1));
+
+        Emit(c, half, 0f,
+        [
+            (spine[0].X + n0.X * Bar, spine[0].Y + n0.Y * Bar),
+            (spine[1].X + mid.X * Bar * scale, spine[1].Y + mid.Y * Bar * scale),
+            (spine[2].X + n1.X * Bar, spine[2].Y + n1.Y * Bar),
+            (spine[2].X - n1.X * Bar, spine[2].Y - n1.Y * Bar),
+            (spine[1].X - mid.X * Bar * scale, spine[1].Y - mid.Y * Bar * scale),
+            (spine[0].X - n0.X * Bar, spine[0].Y - n0.Y * Bar),
+        ]);
+    }
+
+    /// <summary>
+    /// Emits one closed figure from a point list in the unit box: rotated, re-centred on
+    /// its own ink, then fitted so the ink half-extent is exactly `half` on both axes and
+    /// lands on c. Centring the measured ink (not the point cloud's origin) is what puts
+    /// an asymmetric glyph such as the tick under the centre the layout reserved.
+    /// </summary>
+    static void Emit(V2 c, float half, float rotation, (float X, float Y)[] pts)
+    {
+        var sin = MathF.Sin(rotation);
+        var cos = MathF.Cos(rotation);
+        float minX = float.MaxValue, maxX = float.MinValue;
+        float minY = float.MaxValue, maxY = float.MinValue;
+        var mapped = new V2[pts.Length];
+        for (int i = 0; i < pts.Length; i++)
+        {
+            var p = new V2(pts[i].X * cos - pts[i].Y * sin, pts[i].X * sin + pts[i].Y * cos);
+            mapped[i] = p;
+            minX = MathF.Min(minX, p.X); maxX = MathF.Max(maxX, p.X);
+            minY = MathF.Min(minY, p.Y); maxY = MathF.Max(maxY, p.Y);
+        }
+        var mid = new V2((minX + maxX) / 2f, (minY + maxY) / 2f);
+        // One scale for both axes, so the shape keeps its proportions.
+        float k = half / MathF.Max(maxX - minX, maxY - minY) * 2f;
+        Pending.Add(sink =>
+        {
+            sink.BeginFigure(c + (mapped[0] - mid) * k, FigureBegin.Filled);
+            for (int i = 1; i < mapped.Length; i++) sink.AddLine(c + (mapped[i] - mid) * k);
+            sink.EndFigure(FigureEnd.Closed);
+        });
     }
 
     /// <summary>

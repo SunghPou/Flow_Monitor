@@ -1336,6 +1336,22 @@ public static class SelfTest
                                     }
                                     Check(gapsOk, "measured header gaps hold their design tokens",
                                         gapText.ToString().Trim());
+
+                                    // One filled region: a glyph drawn as a union of strokes
+                                    // composites twice where the strokes cross, so a few
+                                    // pixels in the middle are brighter than the arms
+                                    // (docs/design.md icon rule 24).
+                                    foreach (int bi in new[] { 0, 6 })
+                                    {
+                                        var lum = InkLuminance(px, cardW, cardH, e[bi].Left, e[bi].Right, 4, 34);
+                                        Check(lum.Length >= 8, $"{badgeName(bi)} has enough ink to judge",
+                                            $"{lum.Length} ink pixel(s) in {e[bi].Left}..{e[bi].Right}");
+                                        if (lum.Length >= 8)
+                                            Check(PeakOverPlateau(lum) <= 0.10f,
+                                                $"{badgeName(bi)} is one filled region, not overlapping strokes",
+                                                $"peak {lum[0]} vs plateau {lum[(int)(lum.Length * 0.9f)]} " +
+                                                $"(+{PeakOverPlateau(lum) * 100f:0}% over the plateau; a crossing is +100%)");
+                                    }
                                 }
                             }
                             catch (Exception ex) { failures++; Log.Write("ERROR", "header ink test threw: " + ex); }
@@ -1862,6 +1878,33 @@ public static class SelfTest
     /// Ink predicate for the header strip: near-white glyphs and text, or a saturated
     /// chip. Gridlines (white at 5%) and the panel fill stay well under the threshold.
     /// </summary>
+    static string badgeName(int element) => element == 0 ? "X badge" : "check badge";
+
+    /// <summary>Luminance of every ink pixel in a box, brightest first.</summary>
+    static int[] InkLuminance(byte[] px, int w, int h, int xLo, int xHi, int yLo, int yHi)
+    {
+        var list = new List<int>();
+        for (int y = Math.Max(0, yLo); y <= Math.Min(h - 1, yHi); y++)
+            for (int x = Math.Max(0, xLo); x <= Math.Min(w - 1, xHi); x++)
+            {
+                int i = (y * w + x) * 4;
+                if (!HeaderInk(px, i)) continue;
+                byte b = px[i], g = px[i + 1], r = px[i + 2];
+                list.Add((r * 299 + g * 587 + b * 114) / 1000);
+            }
+        list.Sort();
+        list.Reverse();
+        return list.ToArray();
+    }
+
+    /// <summary>How far the brightest pixel runs past the glyph's plateau luminance.</summary>
+    static float PeakOverPlateau(int[] lum)
+    {
+        if (lum.Length < 8) return 0f;
+        int plateau = lum[(int)(lum.Length * 0.9f)];
+        return plateau <= 0 ? 0f : (lum[0] - plateau) / (float)plateau;
+    }
+
     static bool HeaderInk(byte[] px, int i)
     {
         byte b = px[i], g = px[i + 1], r = px[i + 2], a = px[i + 3];

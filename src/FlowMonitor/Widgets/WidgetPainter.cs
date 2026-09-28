@@ -73,19 +73,14 @@ public static class WidgetPainter
         float size = WidgetWindow.CheckMarkSize * s * (0.70f + 0.30f * ease);
         var center = new V2((boxLogical.Left + boxLogical.Width * 0.5f) * s,
             (boxLogical.Top + boxLogical.Height * 0.5f) * s);
-        float sc = 0.5f + 0.5f * ease;
 
         dc.PushAxisAlignedClip(new RectF(0, 0, width, height), AntialiasMode.Aliased);
-        dc.Transform = Matrix3x2.CreateScale(sc, sc, center);
 
         // One filled outline at the standard weight, so the tick carries the same bar
         // width as the X instead of reading thin next to it.
         float half = size * BadgeInk;
-        float t = Math.Max(1f, half * GlyphGeometry.BarRatio);
         var glyph = res.Brush(new Color4(1f, 1f, 1f, amount * (0.5f + 0.5f * hover)));
-        FillAll(dc, GlyphGeometry.Build(res, () => GlyphGeometry.Check(center, half, t)), glyph);
-
-        dc.Transform = Matrix3x2.Identity;
+        FillAll(dc, GlyphGeometry.Build(res, () => GlyphGeometry.Check(center, half)), glyph);
         dc.PopAxisAlignedClip();
     }
 
@@ -103,19 +98,14 @@ public static class WidgetPainter
 
         var center = new V2((boxLogical.Left + boxLogical.Width * 0.5f) * s,
             (boxLogical.Top + boxLogical.Height * 0.5f) * s);
-        float sc = 0.5f + 0.5f * ease;
 
         dc.PushAxisAlignedClip(new RectF(0, 0, width, height), AntialiasMode.Aliased);
-        dc.Transform = Matrix3x2.CreateScale(sc, sc, center);
 
         // One filled outline at the standard weight: two crossing strokes double-composite
         // where they meet, and a short fat one reads as a blob.
         float half = size * BadgeInk;
-        float t = Math.Max(1f, half * GlyphGeometry.BarRatio);
         var glyph = res.Brush(new Color4(1f, 1f, 1f, amount * (0.5f + 0.5f * hover)));
-        FillAll(dc, GlyphGeometry.Build(res, () => GlyphGeometry.X(center, half, t)), glyph);
-
-        dc.Transform = Matrix3x2.Identity;
+        FillAll(dc, GlyphGeometry.Build(res, () => GlyphGeometry.X(center, half)), glyph);
         dc.PopAxisAlignedClip();
     }
 
