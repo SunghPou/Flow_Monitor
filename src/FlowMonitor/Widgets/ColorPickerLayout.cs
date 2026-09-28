@@ -73,7 +73,12 @@ public static class ColorPickerLayout
     public const float ChanGroove = 5f;
     public const float HexLabelW = 38f;
     public const float DropW = 32f;
-    public const float FieldPad = 8f;
+    /// <summary>
+    /// Inset for anything drawn inside a container: a segment's label, a slider's label
+    /// and number, a text field's value. Nothing sits flush to a container edge
+    /// (docs/design.md rule 21), so this is the only padding number in the picker.
+    /// </summary>
+    public const float InnerPad = 8f;
 
     public static readonly string[] SpaceLabels = ["Linear", "Perceptual"];
     public static readonly string[] ModelLabels = ["RGB", "HSV"];

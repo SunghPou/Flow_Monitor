@@ -531,7 +531,8 @@ internal static class ColorPickerWindow
         float radius = 6f * s;
         dc.FillRoundedRectangle(new RoundedRectangle(r, radius, radius),
             res.Brush(active ? SystemTheme.Accent : SystemTheme.Pill));
-        dc.DrawText(text, fmt, new Rect(r.X, r.Y, r.Width, r.Height), ink);
+        float pad = Picker.InnerPad * s;
+        dc.DrawText(text, fmt, new Rect(r.X + pad, r.Y, r.Width - pad * 2f, r.Height), ink);
     }
 
     /// <summary>
@@ -554,8 +555,9 @@ internal static class ColorPickerWindow
         for (int i = 0; i < 4; i++)
         {
             var row = S(Picker.Slider(i), s);
+            float pad = Picker.InnerPad * s;
             dc.FillRoundedRectangle(new RoundedRectangle(row, 6f * s, 6f * s), res.Brush(SystemTheme.Pill));
-            dc.DrawText(labels[i], fmt, new Rect(row.X + 8f * s, row.Y, Picker.ChanLabelW * s, row.Height),
+            dc.DrawText(labels[i], fmt, new Rect(row.X + pad, row.Y, Picker.ChanLabelW * s - pad, row.Height),
                 res.Brush(SystemTheme.MutedInk));
 
             var groove = S(Picker.Groove(i), s);
@@ -576,8 +578,8 @@ internal static class ColorPickerWindow
             string text = _model == PickerModel.Rgb && i < 3
                 ? (i == 0 ? c.R.ToString() : i == 1 ? c.G.ToString() : c.B.ToString())
                 : t[i].ToString("0.000");
-            var slot = new Rect(row.Right - Picker.ChanValueW * s, row.Y, Picker.ChanValueW * s - 8f * s, row.Height);
-            slot.X = row.Right - res.Measure(text, fmt, s).Width - 10f * s;   // right-aligned
+            var slot = new Rect(row.Right - Picker.ChanValueW * s, row.Y, Picker.ChanValueW * s - pad, row.Height);
+            slot.X = row.Right - res.Measure(text, fmt, s).Width - pad;   // right-aligned, InnerPad clear
             dc.DrawText(text, fmt, slot, res.Brush(SystemTheme.Ink));
         }
     }
@@ -592,7 +594,7 @@ internal static class ColorPickerWindow
 
         var box = S(Picker.Hex, s);
         dc.FillRoundedRectangle(new RoundedRectangle(box, 6f * s, 6f * s), res.Brush(SystemTheme.Pill));
-        float pad = Picker.FieldPad * s;
+        float pad = Picker.InnerPad * s;
         dc.DrawText(Current().ToHexWithAlpha(), fmt,
             new Rect(box.X + pad, box.Y, box.Width - pad * 2f, box.Height),
             res.Brush(SystemTheme.Ink));
@@ -607,7 +609,8 @@ internal static class ColorPickerWindow
         var box = S(Picker.Eyedropper, s);
         dc.FillRoundedRectangle(new RoundedRectangle(box, 6f * s, 6f * s), res.Brush(SystemTheme.Pill));
 
-        // The icon is square; centre it in the pill and keep a hair of air around it.
+        // Centred, not flush: the 4px is the art's own margin, and a centred glyph needs
+        // no text pad or it would shrink below the size the reference card shows.
         float d = MathF.Min(box.Width, box.Height) - 4f * s;
         float side = d * Interop.BlenderDropper.Size / 30f;   // the art's own 1px margin
         float cell = side / Interop.BlenderDropper.Size;       // device px per mask pixel

@@ -109,3 +109,25 @@ the gap BETWEEN clusters must exceed the gap WITHIN a cluster, so the left clust
 19. Paint and hit-test share `ColorPickerLayout`; the ring runs red at 3 o'clock
     clockwise (red, magenta, blue, cyan, green, yellow) and the disc is white at the top,
     hue at the rim, black at the bottom.
+20. The card is Blender's circle-HSV picker row for row: the wheel with a thin vertical
+    value bar beside it, the `Linear | Perceptual` and `RGB | HSV` segmented rows, four
+    number sliders (RGB/Alpha or Hue/Saturation/Value/Alpha), then `Hex` + the eyedropper.
+
+## Containers
+
+A rounded rectangle is a **card** (Material: a surface). The names used here and in the
+code: a card is a container; a small interactive one is a **chip**; a row of mutually
+exclusive chips is a **segmented control**; a chip that takes typed text is a **text
+field**; the bar in a slider is its **track** and the dot is its **handle**. The widget
+background behind a header row is a **row**.
+
+21. Nothing is ever drawn flush against a container's edge. Every element inside a card,
+    chip, segment, field or row is inset by `InnerPad` on ALL four sides, from the shared
+    token (`ColorPickerLayout.InnerPad`, 8). No literal padding, and no padding only where
+    it was asked for: the left side is where the mistake shows.
+22. A new control inside a container reuses the container's fill (`SystemTheme.Pill` for
+    rows and chips, `Field` for tracks, `Accent` for a selected segment) and the shared
+    inner pad. If a control needs its own spacing, it is a token in the same file, not a
+    number typed at the call site.
+23. A selected segment is filled with `Accent`; its text keeps the normal ink so the label
+    stays legible on both fills.
