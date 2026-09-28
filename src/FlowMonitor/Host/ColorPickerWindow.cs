@@ -50,6 +50,7 @@ internal static class ColorPickerWindow
     const IntPtr PickTimerId = 2;
     const uint PickTimerMs = 10;
     static bool _wasDown;
+    static int _pickTicks;
 
     /// <summary>Wheel notch size for the value component (Blender's colorpicker_wheel_cb).</summary>
     const double WheelStep = 0.05;
@@ -439,9 +440,11 @@ internal static class ColorPickerWindow
     static void PickScreen()
     {
         _picking = true;
+        _pickTicks = 0;
         _wasDown = (Native.GetAsyncKeyState(Native.VK_LBUTTON) & 0x8000) != 0;
         Native.SetCapture(_hwnd);
         Interop.EyedropperCursor.Apply(true);
+        Log.Info("eyedropper: pick start");
         if (Native.SetTimer(_hwnd, PickTimerId, PickTimerMs, IntPtr.Zero) == IntPtr.Zero)
             Log.Warn("eyedropper: SetTimer failed " + Marshal.GetLastWin32Error());
         try
@@ -464,6 +467,7 @@ internal static class ColorPickerWindow
             _picking = false;
             _done = false;
             Interop.EyedropperCursor.Apply(false);
+            Log.Info("eyedropper: pick end");
         }
         if (_hwnd == IntPtr.Zero) return;               // the pick loop tore the card down
         Native.SetForegroundWindow(_hwnd);
@@ -478,7 +482,12 @@ internal static class ColorPickerWindow
         if (_hwnd != IntPtr.Zero && Native.GetWindowRect(_hwnd, out var card)
             && x >= card.Left && x < card.Right && y >= card.Top && y < card.Bottom) return;
         var rgb = Interop.ScreenPick.SampleAt(x, y);
-        if (rgb is Rgba picked) { _hsv = picked.ToHsv(); NotifyChanged(); }
+        if (rgb is Rgba picked)
+        {
+            _hsv = picked.ToHsv();
+            NotifyChanged();
+            Log.Info($"eyedropper: picked {picked.ToHex()} at ({x},{y})");
+        }
         _done = true;
     }
 
@@ -489,6 +498,7 @@ internal static class ColorPickerWindow
     /// </summary>
     static void OnPickTimer()
     {
+        if (++_pickTicks == 1) Log.Info("eyedropper: first tick");
         Interop.EyedropperCursor.Apply(true);
         if ((Native.GetAsyncKeyState(Native.VK_ESCAPE) & 0x8000) != 0) { _cancelled = true; _done = true; return; }
         bool down = (Native.GetAsyncKeyState(Native.VK_LBUTTON) & 0x8000) != 0;
