@@ -44,8 +44,6 @@ public readonly record struct Rgba
     /// </summary>
     public string ToHexWithAlpha() => A == 255 ? ToHex() : $"#{R:X2}{G:X2}{B:X2}{A:X2}";
 
-    public Rgba WithAlpha(byte a) => new(R, G, B, a);
-
     /// <summary>The same colour in Blender's Linear working space.</summary>
     public Rgba ToLinear() => new(
         ColorTransfer.Byte(ColorTransfer.SrgbToLinear(R / 255.0)),
@@ -58,12 +56,6 @@ public readonly record struct Rgba
         ColorTransfer.Byte(ColorTransfer.LinearToSrgb(b / 255.0)), a);
 
     public Color4 ToColor4() => new(R / 255f, G / 255f, B / 255f, A / 255f);
-
-    public static Rgba FromColor4(Color4 c) => new(
-        (byte)Math.Clamp(c.R * 255f, 0f, 255f),
-        (byte)Math.Clamp(c.G * 255f, 0f, 255f),
-        (byte)Math.Clamp(c.B * 255f, 0f, 255f),
-        (byte)Math.Clamp(c.A * 255f, 0f, 255f));
 }
 
 /// <summary>Hue in degrees [0,360), saturation and value in [0,1].</summary>

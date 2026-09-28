@@ -60,7 +60,6 @@ internal unsafe struct MIB_IF_ROW2
     public const int IfTypeSoftwareLoopback = 24;
     public const int NetIfAccessLoopback = 1;
     public const int NdisMediumLoopback = 17;
-    public const int NdisMediumWirelessLan = 1;
 
     public bool IsUp => OperStatus == IfOperStatusUp;
     public bool IsLoopback =>
@@ -81,10 +80,4 @@ internal static class IpHlpApi
 {
     [DllImport("iphlpapi.dll", SetLastError = false)]
     public static extern uint GetIfTable2(out IntPtr table);
-
-    [DllImport("iphlpapi.dll", SetLastError = false)]
-    public static extern uint GetIfEntry2(ref MIB_IF_ROW2 row);
-
-    [DllImport("iphlpapi.dll", SetLastError = false)]
-    public static extern uint ConvertInterfaceLuidToAlias(ref ulong luid, [Out] byte[] alias, ushort length);
 }

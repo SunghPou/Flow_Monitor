@@ -28,8 +28,6 @@ public sealed unsafe class NetworkSampler
     /// <summary>Friendly name of the interface currently being graphed.</summary>
     public string InterfaceName { get; private set; } = "Network";
     public string InterfaceDescription { get; private set; } = "";
-    public double SendLinkSpeedBps { get; private set; }
-    public double RecvLinkSpeedBps { get; private set; }
     public bool Available { get; private set; }
 
     public float LastSend { get; private set; }
@@ -65,8 +63,6 @@ public sealed unsafe class NetworkSampler
         string alias = row.AliasString;
         InterfaceName = alias.Length > 0 ? alias : "Ethernet";
         InterfaceDescription = row.DescriptionString;
-        RecvLinkSpeedBps = row.ReceiveLinkSpeed;
-        SendLinkSpeedBps = row.TransmitLinkSpeed;
 
         if (!_primed) { _primed = true; return; }   // first tick only establishes the baselines
         LastSend = (float)_outRate[best];

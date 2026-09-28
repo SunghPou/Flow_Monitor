@@ -1274,7 +1274,7 @@ public sealed class DesktopHost : IRenderHost, IDisposable
 
     public void SetMenuOpen(bool open) => _menuOpen = open;
 
-    public void ShowContextMenu(WidgetWindow widget, int x, int y) => M3ContextMenu.Show(this, widget, x, y);
+    public void ShowContextMenu(WidgetWindow widget, int x, int y) => ModernMenu.Show(this, widget, x, y);
 
     public void CloseWidget(WidgetWindow widget) => CloseWidget(widget, deleteSaved: true);
 

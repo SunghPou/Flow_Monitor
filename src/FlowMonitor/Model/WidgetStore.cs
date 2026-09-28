@@ -39,10 +39,10 @@ public static class WidgetStore
             if (string.IsNullOrEmpty(root)) continue;
             string dir = Path.Combine(root, "FlowMonitor", "widgets");
             if (!Writable(dir)) continue;
-            if (CountConfigs(dir) > 0) return SweepTmp(dir);
+            if (CountConfigs(dir) > 0) return dir;
             firstWritable ??= dir;
         }
-        if (firstWritable is not null) return SweepTmp(firstWritable);
+        if (firstWritable is not null) return firstWritable;
         return Path.Combine(AppContext.BaseDirectory, "widgets");
     }
 
@@ -64,20 +64,6 @@ public static class WidgetStore
     {
         try { return System.IO.Directory.Exists(dir) ? System.IO.Directory.GetFiles(dir, "*.json").Length : 0; }
         catch { return 0; }
-    }
-
-    /// <summary>Removes half-written temporaries a hard kill left behind; they are never read.</summary>
-    static string SweepTmp(string dir)
-    {
-        try
-        {
-            foreach (string file in System.IO.Directory.EnumerateFiles(dir, "*.json.tmp"))
-            {
-                try { File.Delete(file); } catch { /* locked; a unique temp name makes it harmless */ }
-            }
-        }
-        catch (Exception ex) { Log.Warn("WidgetStore tmp sweep failed: " + ex.Message); }
-        return dir;
     }
 
     static string PathFor(string id) => Path.Combine(ResolvedDirectory, Sanitize(id) + ".json");

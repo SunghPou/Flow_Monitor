@@ -1,32 +1,14 @@
-using System.Globalization;
 using Vortice.Direct2D1;
 using V2 = System.Numerics.Vector2;
-using Size = Vortice.Mathematics.Size;
 
 namespace FlowMonitor.Widgets;
 
 /// <summary>
-/// Icon glyphs as filled outlines. Blender draws these as round-capped strokes
-/// (release/datafiles/icons_svg/x.svg, checkmark.svg, eyedropper.svg). A round-capped
-/// segment is a capsule (two offsets plus two half-circle arcs) and a round join is the
-/// disc at the vertex, so the same three primitives give caps, joins and the dropper's
-/// bulb.
-///
-/// Each primitive becomes its OWN geometry. D2D fills a path geometry with the
-/// even-odd rule, so two crossing capsules in one geometry cancel their overlap and
-/// punch a hole where the arms cross. Separate geometries are separate fills, and an
-/// opaque fill over an opaque fill leaves no seam. The badge glyphs therefore spell their
-/// round caps as points of one contour rather than stacking capsules.
+/// Icon glyphs as single closed contours (X, check, dropper). One contour per
+/// primitive, filled opaque over opaque, so overlaps never seam or cancel.
 /// </summary>
 public static class GlyphGeometry
 {
-    /// <summary>
-    /// Bar half-thickness for a glyph of ink half-extent <paramref name="half"/>. A system
-    /// close/tick icon is about 14% of its ink half-extent in bar width; heavier reads as
-    /// a blob at badge sizes.
-    /// </summary>
-    public const float BarRatio = 0.137f;
-
     /// <summary>
     /// Fraction of a button's side that a glyph-only icon spans. A standard icon
     /// inside a button leaves roughly this much air on each side; filling the box
@@ -36,30 +18,6 @@ public static class GlyphGeometry
 
     /// <summary>Outlines collected by the primitives, one per primitive.</summary>
     static readonly List<Action<ID2D1GeometrySink>> Pending = new();
-
-    /// <summary>A capsule: a bar of half-thickness t from a to b with round caps.</summary>
-    public static void Capsule(V2 a, V2 b, float t, int seg = 10)
-    {
-        double dx = b.X - a.X, dy = b.Y - a.Y;
-        double len = Math.Sqrt(dx * dx + dy * dy);
-        if (len < 1e-6) { Disc(a, t, seg); return; }
-        double ux = dx / len, uy = dy / len;                 // along the bar
-        double nx = -uy, ny = ux;                            // across the bar
-        var pts = new V2[2 * (seg + 1)];
-        int n = 0;
-        // Far cap: n -> u -> -n. Near cap: -n -> -u -> n. Same sweep direction both
-        // times, so the outline is a simple closed loop.
-        for (int i = 0; i <= seg; i++) Arc(pts, ref n, b, nx, ny, ux, uy, t, Math.PI * i / seg);
-        for (int i = 0; i <= seg; i++) Arc(pts, ref n, a, nx, ny, ux, uy, t, Math.PI + Math.PI * i / seg);
-        Add(pts, n);
-    }
-
-    static void Arc(V2[] pts, ref int n, V2 c, double nx, double ny, double ux, double uy,
-        double t, double th)
-    {
-        double co = Math.Cos(th) * t, si = Math.Sin(th) * t;
-        pts[n++] = new V2((float)(c.X + nx * co + ux * si), (float)(c.Y + ny * co + uy * si));
-    }
 
     /// <summary>
     /// The semicircle that caps a bar of half-thickness t at its free end: from c + n*t
@@ -94,30 +52,6 @@ public static class GlyphGeometry
             double th = from + sweep * i / seg;
             pts.Add(new V2(c.X + (float)(r * Math.Cos(th)), c.Y + (float)(r * Math.Sin(th))));
         }
-    }
-
-    /// <summary>A filled disc of radius r (a round join, a bulb, a dot).</summary>
-    public static void Disc(V2 c, float r, int seg = 20)
-    {
-        var pts = new V2[seg];
-        for (int i = 0; i < seg; i++)
-        {
-            double th = -Math.PI * 2.0 * i / seg;
-            pts[i] = new V2(c.X + (float)(r * Math.Cos(th)), c.Y + (float)(r * Math.Sin(th)));
-        }
-        Add(pts, seg);
-    }
-
-    static void Add(V2[] pts, int n)
-    {
-        var exact = new V2[n];
-        Array.Copy(pts, exact, n);
-        Pending.Add(sink =>
-        {
-            sink.BeginFigure(exact[0], FigureBegin.Filled);
-            for (int p = 1; p < exact.Length; p++) sink.AddLine(exact[p]);
-            sink.EndFigure(FigureEnd.Closed);
-        });
     }
 
     /// <summary>

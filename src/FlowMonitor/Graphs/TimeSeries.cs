@@ -18,7 +18,6 @@ public sealed class TimeSeries
     int _head;      // index of the next write slot
     int _count;
 
-    public int Capacity => _times.Length;
     public int Count => _count;
     public double NewestTime => _count == 0 ? 0 : TimeAt(_count - 1);
 
@@ -27,8 +26,6 @@ public sealed class TimeSeries
         _times = new double[capacity];
         _values = new float[capacity];
     }
-
-    public void Clear() { _head = 0; _count = 0; }
 
     public void Add(double time, float value)
     {
@@ -91,24 +88,5 @@ public sealed class TimeSeries
             if (TimeAt(i) >= windowStart)
                 min = Math.Min(min, ValueAt(i));
         return min == float.MaxValue ? 0f : min;
-    }
-
-    /// <summary>Value at an arbitrary instant. Linear between samples, held flat outside range.</summary>
-    public float ValueAtTime(double t)
-    {
-        if (_count == 0) return 0f;
-        if (_count == 1 || t <= TimeAt(0)) return ValueAt(0);
-        if (t >= TimeAt(_count - 1)) return ValueAt(_count - 1);
-
-        int lo = 0, hi = _count - 1;
-        while (hi - lo > 1)
-        {
-            int mid = (lo + hi) / 2;
-            if (TimeAt(mid) <= t) lo = mid; else hi = mid;
-        }
-
-        double t0 = TimeAt(lo), t1 = TimeAt(hi);
-        double f = t1 <= t0 ? 0 : (t - t0) / (t1 - t0);
-        return (float)(ValueAt(lo) + (ValueAt(hi) - ValueAt(lo)) * f);
     }
 }

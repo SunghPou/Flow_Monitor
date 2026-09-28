@@ -97,19 +97,4 @@ public sealed class CpuSampler
             _telemetry.Add(Total, now, pct);
         }
     }
-
-    public float LatestUtilization => _telemetry.Read(() => Total.Latest);
-
-    public IReadOnlyList<float> LatestCoreUtilization
-    {
-        get
-        {
-            var list = new float[Cores.Length];
-            _telemetry.Read(() =>
-            {
-                for (int i = 0; i < Cores.Length; i++) list[i] = Cores[i].Latest;
-            });
-            return list;
-        }
-    }
 }

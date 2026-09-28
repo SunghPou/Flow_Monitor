@@ -24,21 +24,12 @@ public sealed class RenderDevice : IDisposable
     /// </summary>
     public object GpuLock { get; } = new();
 
-    /// <summary>
-    /// Why the device went away, or S_OK if healthy. Device loss is process-wide
-    /// (single shared D3D/D2D/DComp device), so any failure here is not widget-local.
-    /// </summary>
-    // NOTE: ID3D11Device::GetDeviceRemovedReason is not surfaced by Vortice 3.8.3;
-    // classify device-wide vs widget-local by how many widgets faulted in the same frame.
-    public const int DeviceReasonUnavailable = unchecked((int)0x80004005); // E_FAIL: cannot ask
-
     public ID3D11DeviceContext D3DContext { get; }
     public IDXGIDevice DxgiDevice { get; }
     public IDXGIFactory4 DxgiFactory { get; }
     public ID2D1Factory1 D2DFactory { get; }
     public ID2D1Device D2DDevice { get; }
     public IDCompositionDevice CompositionDevice { get; }
-    public IDCompositionDevice3? CompositionDevice3 { get; }
     public IDWriteFactory DWriteFactory { get; }
 
     /// <summary>
@@ -70,7 +61,6 @@ public sealed class RenderDevice : IDisposable
         // Composition device is created from the DXGI device, not via QI off ID2D1Device.
         CompositionDevice = DComp.DCompositionCreateDevice<IDCompositionDevice>(DxgiDevice)
             ?? throw new InvalidOperationException("DCompositionCreateDevice returned null.");
-        CompositionDevice3 = CompositionDevice.QueryInterfaceOrNull<IDCompositionDevice3>();
 
         DWriteFactory = DWrite.DWriteCreateFactory<IDWriteFactory>(DWriteFactoryType.Shared);
 
@@ -94,7 +84,6 @@ public sealed class RenderDevice : IDisposable
 
     public void Dispose()
     {
-        CompositionDevice3?.Dispose();
         ResourceContext.Dispose();
         DWriteFactory.Dispose();
         CompositionDevice.Dispose();

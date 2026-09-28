@@ -8,7 +8,6 @@ namespace FlowMonitor;
 /// </summary>
 public static class Log
 {
-    static readonly object Gate = new();
     static bool _enabled = Environment.GetEnvironmentVariable("FLOWMONITOR_LOG") != "0";
 
     public static string Directory

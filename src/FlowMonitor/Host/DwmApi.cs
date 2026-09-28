@@ -5,12 +5,6 @@ using static FlowMonitor.Interop.Native;
 namespace FlowMonitor.Host;
 
 [StructLayout(LayoutKind.Sequential)]
-public struct DWM_FRAME_RATE
-{
-    public uint Numerator, Denominator;
-}
-
-[StructLayout(LayoutKind.Sequential)]
 public struct DWM_TIMING_INFO
 {
     public ulong QpcCompose;
