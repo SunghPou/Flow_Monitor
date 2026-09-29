@@ -147,25 +147,29 @@ public static class WidgetPainter
             float tipX = center.X + (prev ? -r : r);
             float backX = center.X + (prev ? r : -r);
             float dir = prev ? 1f : -1f;
-            // Sharp corners catch the eye next to the round badges, so every vertex
-            // gets a parabolic fillet: tangent at both ends, still one filled region.
-            float fillet = 1.2f * s;
+            // Even bar: the inner contour stands further off than the geometry says,
+            // otherwise the bend pinches thinner than the arms. Outer vertices never
+            // move; only their smoothing grows.
+            float push = 0.7f * s;
             V2[] pts = [
                 new(tipX, center.Y),
                 new(backX, center.Y - r - k),
-                new(backX, center.Y - r + k),
-                new(tipX + dir * 2f * k, center.Y),
-                new(backX, center.Y + r - k),
+                new(backX, center.Y - r + k + push),
+                new(tipX + dir * (2f * k + push), center.Y),
+                new(backX, center.Y + r - k - push),
                 new(backX, center.Y + r + k),
             ];
-            float minEdge = float.MaxValue;
-            for (int i = 0; i < 6; i++)
+            // Outer corners round wide, inner bends keep a small fillet, the notch
+            // itself stays sharp.
+            float[] radii = [3.0f * s, 3.0f * s, 1.5f * s, 0f, 1.5f * s, 3.0f * s];
+            float F(int i)
             {
-                var a = pts[i];
-                var c = pts[(i + 1) % 6];
-                minEdge = Math.Min(minEdge, MathF.Sqrt((c.X - a.X) * (c.X - a.X) + (c.Y - a.Y) * (c.Y - a.Y)));
+                float e1 = Dist(pts[i], pts[(i + 5) % 6]);
+                float e2 = Dist(pts[i], pts[(i + 1) % 6]);
+                return Math.Min(radii[i], Math.Min(e1, e2) / 2f);
             }
-            float f = Math.Min(fillet, minEdge / 2f);
+            float Dist(V2 a, V2 c)
+                => MathF.Sqrt((c.X - a.X) * (c.X - a.X) + (c.Y - a.Y) * (c.Y - a.Y));
             var ink = res.Brush(new Color4(ArrowInk.R, ArrowInk.G, ArrowInk.B, ArrowInk.A * amount));
             dc.PushAxisAlignedClip(new RectF(0, 0, width, height), AntialiasMode.Aliased);
             var geo = res.D2DFactory.CreatePathGeometry();
@@ -183,7 +187,8 @@ public static class WidgetPainter
                     if (side == 0) return v;
                     var o = pts[side < 0 ? (i + 5) % 6 : (i + 1) % 6];
                     var d = Unit(v, o);
-                    return new V2(v.X + d.X * f, v.Y + d.Y * f);
+                    float fj = F(i);
+                    return new V2(v.X + d.X * fj, v.Y + d.Y * fj);
                 }
                 sink.BeginFigure(Corner(0, -1), FigureBegin.Filled);
                 for (int i = 1; i <= 6; i++)
