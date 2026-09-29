@@ -4,7 +4,7 @@ using V2 = System.Numerics.Vector2;
 namespace FlowMonitor.Widgets;
 
 /// <summary>
-/// Icon glyphs as single closed contours (X, check, dropper). One contour per
+/// Icon glyphs as single closed contours (X, check, chevron, dropper). One contour per
 /// primitive, filled opaque over opaque, so overlaps never seam or cancel.
 /// </summary>
 public static class GlyphGeometry
@@ -114,6 +114,42 @@ public static class GlyphGeometry
         // corner (the one the contour reaches from the inner elbow) and closes back on the
         // outer one; walking it the other way crosses the contour and drops a detached nub.
         Cap(pts, spine[0], -n0, -d0, Bar);
+        Emit(c, half, 0f, pts);
+    }
+
+    /// <summary>
+    /// The metric chevron as ONE closed contour: two bars joined at the tip, the same
+    /// spine/Bar/Cap/Sweep construction as the tick. The outer tip is a round join,
+    /// the inner notch a sharp miter; the free back ends get round caps.
+    /// </summary>
+    public static void Chevron(V2 c, float half, bool left)
+    {
+        // Spine: upper back end, tip, lower back end. Bar half-width 0.22 of the
+        // fitted ink half-extent, the same visual weight as the current 3.7px bar.
+        // Always built tip-left, then mirrored: mirroring the spine itself flips the
+        // normals onto the wrong side (round notch, spiked tip on the right arrow).
+        V2[] spine = [new(0.62f, -0.78f), new(-0.62f, 0f), new(0.62f, 0.78f)];
+        const float Bar = 0.22f;
+
+        V2 Dir(int i) => V2.Normalize(spine[i + 1] - spine[i]);
+        var d0 = Dir(0);
+        var d1 = Dir(1);
+        var n0 = new V2(-d0.Y, d0.X);
+        var n1 = new V2(-d1.Y, d1.X);
+        // Both normals face the outer tip side, so the sweep rounds the tip and the
+        // miter folds the inner notch. Same arrangement as the tick's elbow.
+        var mid = V2.Normalize(n0 + n1);
+        float scale = 1f / MathF.Max(0.4f, MathF.Abs(V2.Dot(mid, n1)));
+
+        var pts = new List<V2> { spine[0] + n0 * Bar };
+        Sweep(pts, spine[1], n0, n1, Bar);
+        pts.Add(spine[2] + n1 * Bar);
+        Cap(pts, spine[2], n1, d1, Bar);
+        pts.Add(spine[1] - mid * Bar * scale);
+        pts.Add(spine[0] - n0 * Bar);
+        Cap(pts, spine[0], -n0, -d0, Bar);
+        if (!left)
+            for (int i = 0; i < pts.Count; i++) pts[i] = new V2(-pts[i].X, pts[i].Y);
         Emit(c, half, 0f, pts);
     }
 

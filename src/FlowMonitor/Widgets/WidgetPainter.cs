@@ -32,15 +32,11 @@ public static class WidgetPainter
     /// reserves exactly this, so a badge is anchored on its real ink (docs/design.md 15).
     /// </summary>
     public static readonly float BadgeGlyphHalf = WidgetWindow.CheckMarkSize * BadgeInk;
-    /// <summary>Centre-to-tip distance of a metric chevron, in logical px at full ease.</summary>
-    public const float ChevronTip = 6f;
-    /// <summary>Bar width of a metric chevron, in logical px: one filled region, not strokes.</summary>
-    public const float ChevronStroke = 3.7f;
     /// <summary>
-    /// Drawn half-extent of a metric chevron in logical px at full ease: the tip radius
-    /// plus the bar's diagonal overhang, so the reserve matches the ink.
+    /// Drawn half-extent of a metric chevron in logical px at full ease. The walk is
+    /// fitted to exactly this, so the reserve matches the ink.
     /// </summary>
-    public static readonly float ChevronGlyphHalf = ChevronTip + ChevronStroke * MathF.Sqrt(2f) / 2f;
+    public const float ChevronGlyphHalf = 8.6f;
     /// <summary>Corner bracket inset from the card edge, in logical px.</summary>
     public const float CornerInset = 5.5f;
     /// <summary>Corner bracket arm length, in logical px.</summary>
@@ -122,7 +118,8 @@ public static class WidgetPainter
 
     /// <summary>
     /// Metric switcher chevrons flanking the title. Edit mode only; boxes come from
-    /// HeaderLayout via the window, so paint and hit-test are the same rects.
+    /// HeaderLayout via the window, so paint and hit-test are the same rects. One
+    /// shared-contour fill per chevron, like the badges.
     /// </summary>
     public static void PaintMetricArrows(ID2D1DeviceContext dc, ResourceCache res, WidgetConfig cfg,
         float width, float height, float amount,
@@ -137,81 +134,11 @@ public static class WidgetPainter
         {
             if (lr.Width <= 0) continue;
             var center = new V2((lr.Left + lr.Width * 0.5f) * s, (lr.Top + lr.Height * 0.5f) * s);
-            float r = ChevronTip * (0.70f + 0.30f * ease) * s;
-            // One filled hexagon per chevron: two stroked arms double-composite at the
-            // joint, so the join reads darker than the arms (docs/design.md 24).
-            // Bar half-width, scaled like the rest of the glyph; the diagonal overhang
-            // of a 45-degree bar is b * sqrt(2).
-            float b = ChevronStroke / 2f * s;
-            float k = b * MathF.Sqrt(2f);
-            float tipX = center.X + (prev ? -r : r);
-            float backX = center.X + (prev ? r : -r);
-            float dir = prev ? 1f : -1f;
-            // Even bar: the inner contour stands further off than the geometry says,
-            // otherwise the bend pinches thinner than the arms. Outer vertices never
-            // move; only their smoothing grows.
-            float push = 0.7f * s;
-            V2[] pts = [
-                new(tipX, center.Y),
-                new(backX, center.Y - r - k),
-                new(backX, center.Y - r + k + push),
-                new(tipX + dir * (2f * k + push), center.Y),
-                new(backX, center.Y + r - k - push),
-                new(backX, center.Y + r + k),
-            ];
-            // Outer corners round wide, inner bends keep a small fillet, the notch
-            // itself stays sharp.
-            float[] radii = [3.0f * s, 3.0f * s, 1.5f * s, 0f, 1.5f * s, 3.0f * s];
-            float F(int i)
-            {
-                float e1 = Dist(pts[i], pts[(i + 5) % 6]);
-                float e2 = Dist(pts[i], pts[(i + 1) % 6]);
-                return Math.Min(radii[i], Math.Min(e1, e2) / 2f);
-            }
-            float Dist(V2 a, V2 c)
-                => MathF.Sqrt((c.X - a.X) * (c.X - a.X) + (c.Y - a.Y) * (c.Y - a.Y));
+            // Shrink anchored to rect centre so ease-in does not walk the badge.
+            float half = ChevronGlyphHalf * (0.70f + 0.30f * ease) * s;
             var ink = res.Brush(new Color4(ArrowInk.R, ArrowInk.G, ArrowInk.B, ArrowInk.A * amount));
             dc.PushAxisAlignedClip(new RectF(0, 0, width, height), AntialiasMode.Aliased);
-            var geo = res.D2DFactory.CreatePathGeometry();
-            using (var sink = geo.Open())
-            {
-                V2 Unit(V2 from, V2 to)
-                {
-                    float dx = to.X - from.X, dy = to.Y - from.Y;
-                    float len = Math.Max(MathF.Sqrt(dx * dx + dy * dy), 0.0001f);
-                    return new V2(dx / len, dy / len);
-                }
-                V2 Corner(int i, int side)
-                {
-                    var v = pts[i];
-                    if (side == 0) return v;
-                    var o = pts[side < 0 ? (i + 5) % 6 : (i + 1) % 6];
-                    var d = Unit(v, o);
-                    float fj = F(i);
-                    return new V2(v.X + d.X * fj, v.Y + d.Y * fj);
-                }
-                sink.BeginFigure(Corner(0, -1), FigureBegin.Filled);
-                for (int i = 1; i <= 6; i++)
-                {
-                    int j = i % 6;
-                    // The inner notch stays sharp; every other corner is a parabola
-                    // subdivided into line segments: one filled region either way,
-                    // and lines are the proven primitive here.
-                    if (j == 3) { sink.AddLine(pts[3]); continue; }
-                    var a = Corner(j, -1);
-                    var v = Corner(j, 0);
-                    var e = Corner(j, 1);
-                    sink.AddLine(a);
-                    for (int sgm = 1; sgm <= 4; sgm++)
-                    {
-                        float u = sgm / 4f, w0 = (1f - u) * (1f - u), w1 = 2f * (1f - u) * u, w2 = u * u;
-                        sink.AddLine(new V2(a.X * w0 + v.X * w1 + e.X * w2, a.Y * w0 + v.Y * w1 + e.Y * w2));
-                    }
-                }
-                sink.EndFigure(FigureEnd.Closed);
-                sink.Close();
-            }
-            using (geo) dc.FillGeometry(geo, ink);
+            FillAll(dc, GlyphGeometry.Build(res, () => GlyphGeometry.Chevron(center, half, prev)), ink);
             dc.PopAxisAlignedClip();
         }
     }
