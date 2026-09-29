@@ -35,9 +35,6 @@ internal static class Pdh
     [DllImport("pdh.dll", EntryPoint = "PdhCollectQueryData")]
     public static extern uint PdhCollectQueryData(IntPtr query);
 
-    [DllImport("pdh.dll", CharSet = CharSet.Unicode, EntryPoint = "PdhGetFormattedCounterValue")]
-    public static extern uint PdhGetFormattedCounterValue(IntPtr counter, uint format, IntPtr type, out PDH_FMT_COUNTERVALUE value);
-
     [DllImport("pdh.dll", EntryPoint = "PdhCloseQuery")]
     public static extern uint PdhCloseQuery(IntPtr query);
 
@@ -88,45 +85,6 @@ internal static class Pdh
     public static uint Collect(IntPtr query)
         => query == IntPtr.Zero ? PDH_INVALID_ARGUMENT : PdhCollectQueryData(query);
 
-    /// <summary>A live counter. <see cref="Collect"/> must be called once per sample before reading.</summary>
-    public sealed class Counter : IDisposable
-    {
-        public IntPtr Query { get; }
-        public IntPtr Handle { get; }
-        readonly string _path;
-        public string? Error { get; private set; }
-
-        public Counter(IntPtr query, string path)
-        {
-            _path = path;
-            Query = query;
-            uint rc = PdhAddEnglishCounterW(query, path, IntPtr.Zero, out var h);
-            Handle = h;
-            if (rc != ERROR_SUCCESS || h == IntPtr.Zero)
-                Error = $"PdhAddEnglishCounter 0x{rc:X8} for '{path}'";
-        }
-
-        public bool Valid => Handle != IntPtr.Zero;
-
-        /// <summary>Last formatted value, or NaN when the counter has no valid sample yet.</summary>
-        public double Read()
-        {
-            if (!Valid) return double.NaN;
-            uint rc = PdhGetFormattedCounterValue(Handle,
-                PDH_FMT_COUNTERVALUE_DOUBLE | PDH_FMT_NOCAP100 | PDH_FMT_NOSCALE,
-                IntPtr.Zero, out var v);
-            if (rc != ERROR_SUCCESS || v.CStatus != 0) return double.NaN;
-            return v.doubleValue;
-        }
-
-        public void Dispose()
-        {
-            if (Valid) PdhCloseQuery(Handle);
-        }
-
-        public override string ToString() => _path;
-    }
-
     /// <summary>
     /// A counter whose path contains a wildcard instance list, e.g.
     /// <c>\GPU Engine(*)\Utilization Percentage</c>. Reads every current instance in one call.
@@ -154,11 +112,8 @@ internal static class Pdh
 
         public bool Valid => Handle != IntPtr.Zero;
 
-        public int ItemSize => _itemSize;
         public uint LastError { get; private set; }
         public int LastItemCount { get; private set; }
-        /// <summary>Human-readable reason for the last failure, when the status code is not enough.</summary>
-        public string? LastErrorDetail { get; private set; }
 
         /// <summary>Ceiling on believable array size (64 MB); larger sizes are rejected.</summary>
         const uint MaxArrayBytes = 64u * 1024 * 1024;
@@ -199,7 +154,6 @@ internal static class Pdh
             if (bytes == 0 || bytes > MaxArrayBytes)
             {
                 LastError = PDH_INVALID_ARGUMENT;
-                LastErrorDetail = $"implausible required size {bytes} bytes for '{_path}'";
                 return false;
             }
 
@@ -231,7 +185,5 @@ internal static class Pdh
             if (_buffer != IntPtr.Zero) { Marshal.FreeHGlobal(_buffer); _buffer = IntPtr.Zero; }
             if (Valid) PdhCloseQuery(Handle);
         }
-
-        public override string ToString() => _path;
     }
 }
