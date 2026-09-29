@@ -61,7 +61,6 @@ public sealed class DesktopHost : IRenderHost, IDisposable
     const string KillEventName = @"Local\FlowMonitor.Kill.v1";
     const string NewWidgetEventName = @"Local\FlowMonitor.NewWidget.v1";
     IntPtr _controlWnd;
-    IntPtr _trayWnd;
     IntPtr _killEvent;
     IntPtr _newWidgetEvent;
     Thread? _controlThread;
@@ -122,7 +121,7 @@ public sealed class DesktopHost : IRenderHost, IDisposable
         _current = this;
         RegisterClasses();
         CreateControlWindow();
-        TrayIcon.Add(_trayWnd != IntPtr.Zero ? _trayWnd : _controlWnd);
+        TrayIcon.Add(_controlWnd);
         _telemetry.Start();
 
         _workerW = Desktop.FindWorkerW();
@@ -204,18 +203,6 @@ public sealed class DesktopHost : IRenderHost, IDisposable
         _newWidgetEvent = CreateEventW(IntPtr.Zero, bManualReset: true, bInitialState: false, NewWidgetEventName);
         Log.Info($"Control HWND = 0x{_controlWnd:X}; kill event {Describe(_killEvent)}, new-widget event {Describe(_newWidgetEvent)}");
 
-        // The tray icon and its popup menu need a REAL window: a message-only window can
-        // never take foreground, so menu clicks dismiss instead of selecting. Hidden,
-        // zero-size, never shown; same wndproc as the control channel.
-        int styleBits = WS_POPUP | WS_CLIPSIBLINGS;
-        _trayWnd = CreateWindowExW(
-            WS_EX_TOOLWINDOW, ControlClassName, "FlowMonitor.Tray",
-            unchecked((uint)styleBits),
-            0, 0, 0, 0,
-            IntPtr.Zero, IntPtr.Zero, ModuleHandle, IntPtr.Zero);
-        if (_trayWnd == IntPtr.Zero)
-            Log.Warn("tray owner window failed: " + Marshal.GetLastWin32Error());
-
         static string Describe(IntPtr h) => h == IntPtr.Zero ? "unavailable" : "0x" + h.ToString("X");
     }
 
@@ -265,7 +252,7 @@ public sealed class DesktopHost : IRenderHost, IDisposable
         {
             // Explorer restarted: the notification area forgot the icon.
             var host = _current;
-            if (host is not null) TrayIcon.ReAdd(host.ControlHandle);
+            if (host is not null) TrayIcon.ReAdd(host._controlWnd);
             return IntPtr.Zero;
         }
 
@@ -287,7 +274,7 @@ public sealed class DesktopHost : IRenderHost, IDisposable
     }
 
     /// <summary>Handle the tray popup menu points at for foreground ownership.</summary>
-    internal IntPtr ControlHandle => _trayWnd != IntPtr.Zero ? _trayWnd : _controlWnd;
+    internal IntPtr ControlHandle => _controlWnd;
 
     /// <summary>Tray: one more widget, same as a --new-widget request.</summary>
     internal void AddWidgetFromTray() => SpawnWidgetFromRequest();
@@ -1372,9 +1359,8 @@ public sealed class DesktopHost : IRenderHost, IDisposable
 
         _telemetry.Sampled -= WakeWidgetsForNewSample;
         _telemetry.Dispose();
-        // The icon's callback targets the tray window; pull it before destroying it.
+        // The icon's callback targets the control window; pull it before destroying it.
         TrayIcon.Remove();
-        if (_trayWnd != IntPtr.Zero) { DestroyWindow(_trayWnd); _trayWnd = IntPtr.Zero; }
         // Close the control channel before graphics teardown.
         if (_controlWnd != IntPtr.Zero) { DestroyWindow(_controlWnd); _controlWnd = IntPtr.Zero; }
         if (_killEvent != IntPtr.Zero) { CloseHandle(_killEvent); _killEvent = IntPtr.Zero; }
