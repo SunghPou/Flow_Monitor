@@ -36,7 +36,9 @@ internal static class TrayIcon
         if (_icon == IntPtr.Zero)
         {
             string exe = Environment.ProcessPath ?? "";
+            // ExtractIcon returns 1 (not a handle) when the file holds no icons.
             if (exe.Length > 0) _icon = ExtractIconW(GetModuleHandle(null), exe, 0);
+            if (_icon == IntPtr.Zero || _icon == new IntPtr(1)) _icon = IntPtr.Zero;
             _ownIcon = _icon != IntPtr.Zero;
             if (!_ownIcon) _icon = LoadIconW(IntPtr.Zero, new IntPtr(32512)); // IDI_APPLICATION
         }
@@ -92,7 +94,7 @@ internal static class TrayIcon
         {
             AppendMenuW(menu, MF_STRING, CmdNewWidget, "New widget");
             AppendMenuW(menu, MF_SEPARATOR, 0, "");
-            AppendMenuW(menu, MF_STRING, CmdRestart, "Restart");
+            AppendMenuW(menu, MF_STRING, CmdRestart, "Restart widgets");
             AppendMenuW(menu, MF_STRING | (AutoStart.Enabled ? MF_CHECKED : 0), CmdAutoStart, "Start with Windows");
             AppendMenuW(menu, MF_SEPARATOR, 0, "");
             AppendMenuW(menu, MF_STRING, CmdExit, "Exit");

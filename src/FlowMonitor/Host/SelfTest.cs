@@ -1225,13 +1225,21 @@ public static class SelfTest
                             }
                         }
 
-                        // Auto-start round-trips through its own registry key, never the live one.
-                        AutoStart.SetFor("FlowMonitorSelfTest", true);
-                        bool autoOn = AutoStart.EnabledFor("FlowMonitorSelfTest");
-                        AutoStart.SetFor("FlowMonitorSelfTest", false);
-                        bool autoOff = !AutoStart.EnabledFor("FlowMonitorSelfTest");
+                        // Auto-start round-trips through its own Startup link, never the live one.
+                        bool autoOn = false, autoOff = false;
+                        try
+                        {
+                            AutoStart.SetFor("FlowMonitorSelfTest", true);
+                            autoOn = AutoStart.EnabledFor("FlowMonitorSelfTest");
+                            AutoStart.SetFor("FlowMonitorSelfTest", false);
+                            autoOff = !AutoStart.EnabledFor("FlowMonitorSelfTest");
+                        }
+                        finally
+                        {
+                            AutoStart.SetFor("FlowMonitorSelfTest", false);
+                        }
                         Check(autoOn && autoOff,
-                            "start-with-Windows persists as a per-user Run value",
+                            "start-with-Windows persists as a per-user Startup link",
                             $"on={autoOn} off={autoOff}");
 
                         w.UpdateConfig(cfg);

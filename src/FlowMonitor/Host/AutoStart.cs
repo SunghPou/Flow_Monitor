@@ -1,41 +1,48 @@
 namespace FlowMonitor.Host;
 
 /// <summary>
-/// Start with Windows via the per-user Run key (no admin, no shortcut file to go stale).
-/// The value name is a parameter so the self test can round-trip its own key.
+/// Start with Windows via a shortcut in the per-user Startup folder: no admin, visible
+/// as a file, and the checked state reads back off the link target. The value name is a
+/// parameter so the self test can round-trip its own link.
 /// </summary>
 internal static class AutoStart
 {
-    const string Key = @"Software\Microsoft\Windows\CurrentVersion\Run";
-    const string Value = "FlowMonitor";
+    const string FileName = "FlowMonitor.lnk";
 
-    public static bool Enabled => EnabledFor(Value);
+    static string StartupDir(string? dir = null)
+        => dir ?? Environment.GetFolderPath(Environment.SpecialFolder.Startup);
 
-    public static bool EnabledFor(string value)
+    public static string LinkPath(string? dir = null)
+        => Path.Combine(StartupDir(dir), FileName);
+
+    public static bool Enabled => EnabledFor(FileName);
+
+    public static bool EnabledFor(string fileName)
     {
         try
         {
-            using var k = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(Key);
-            return k?.GetValue(value) is string;
+            string? target = ShellLink.ReadTarget(Path.Combine(StartupDir(), fileName));
+            string exe = Environment.ProcessPath ?? "";
+            return target is not null && exe.Length > 0
+                && string.Equals(target, exe, StringComparison.OrdinalIgnoreCase);
         }
         catch { return false; }
     }
 
-    public static void Set(bool on) => SetFor(Value, on);
+    public static void Set(bool on) => SetFor(FileName, on);
 
-    public static void SetFor(string value, bool on)
+    public static void SetFor(string fileName, bool on)
     {
         try
         {
-            using var k = Microsoft.Win32.Registry.CurrentUser.CreateSubKey(Key);
-            if (k is null) return;
+            string link = Path.Combine(StartupDir(), fileName);
             if (on)
             {
                 string exe = Environment.ProcessPath ?? "";
                 if (exe.Length == 0) return;
-                k.SetValue(value, "\"" + exe + "\"");
+                ShellLink.Write(link, exe, Path.GetDirectoryName(exe) ?? "", "FlowMonitor desktop widgets");
             }
-            else k.DeleteValue(value, throwOnMissingValue: false);
+            else File.Delete(link);
         }
         catch (Exception ex)
         {
