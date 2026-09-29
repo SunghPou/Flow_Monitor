@@ -34,14 +34,13 @@ public static class WidgetPainter
     public static readonly float BadgeGlyphHalf = WidgetWindow.CheckMarkSize * BadgeInk;
     /// <summary>Centre-to-tip distance of a metric chevron, in logical px at full ease.</summary>
     public const float ChevronTip = 6f;
-    /// <summary>Stroke width of a metric chevron, in logical px.</summary>
-    public const float ChevronStroke = 2.2f;
+    /// <summary>Bar width of a metric chevron, in logical px: one filled region, not strokes.</summary>
+    public const float ChevronStroke = 3.7f;
     /// <summary>
-    /// Drawn half-extent of a metric chevron in logical px at full ease, stroke included.
-    /// HeaderLayout reserves exactly this, so the gap to the title is measured from the
-    /// stroke edge rather than from the glyph centre.
+    /// Drawn half-extent of a metric chevron in logical px at full ease: the tip radius
+    /// plus the bar's diagonal overhang, so the reserve matches the ink.
     /// </summary>
-    public static readonly float ChevronGlyphHalf = ChevronTip + Math.Max(2f, ChevronStroke) / 2f;
+    public static readonly float ChevronGlyphHalf = ChevronTip + ChevronStroke * MathF.Sqrt(2f) / 2f;
     /// <summary>Corner bracket inset from the card edge, in logical px.</summary>
     public const float CornerInset = 5.5f;
     /// <summary>Corner bracket arm length, in logical px.</summary>
@@ -132,7 +131,6 @@ public static class WidgetPainter
         if (amount <= 0.01f) return;
         float s = cfg.Dpi;
         float ease = Ease(amount);
-        float w = Math.Max(2f, ChevronStroke * s);
 
         var boxes = new[] { (prevLogical, true), (nextLogical, false) };
         foreach (var (lr, prev) in boxes)
@@ -140,18 +138,30 @@ public static class WidgetPainter
             if (lr.Width <= 0) continue;
             var center = new V2((lr.Left + lr.Width * 0.5f) * s, (lr.Top + lr.Height * 0.5f) * s);
             float r = ChevronTip * (0.70f + 0.30f * ease) * s;
+            // One filled hexagon per chevron: two stroked arms double-composite at the
+            // joint, so the join reads darker than the arms (docs/design.md 24).
+            // Bar half-width, scaled like the rest of the glyph; the diagonal overhang
+            // of a 45-degree bar is b * sqrt(2).
+            float b = ChevronStroke / 2f * s;
+            float k = b * MathF.Sqrt(2f);
+            float tipX = center.X + (prev ? -r : r);
+            float backX = center.X + (prev ? r : -r);
+            float dir = prev ? 1f : -1f;
             var ink = res.Brush(new Color4(ArrowInk.R, ArrowInk.G, ArrowInk.B, ArrowInk.A * amount));
             dc.PushAxisAlignedClip(new RectF(0, 0, width, height), AntialiasMode.Aliased);
-            if (prev)
+            var geo = res.D2DFactory.CreatePathGeometry();
+            using (var sink = geo.Open())
             {
-                dc.DrawLine(new V2(center.X + r, center.Y - r), new V2(center.X - r, center.Y), ink, w, res.RoundStroke);
-                dc.DrawLine(new V2(center.X - r, center.Y), new V2(center.X + r, center.Y + r), ink, w, res.RoundStroke);
+                sink.BeginFigure(new V2(tipX, center.Y), FigureBegin.Filled);
+                sink.AddLine(new V2(backX, center.Y - r - k));
+                sink.AddLine(new V2(backX, center.Y - r + k));
+                sink.AddLine(new V2(tipX + dir * 2f * k, center.Y));
+                sink.AddLine(new V2(backX, center.Y + r - k));
+                sink.AddLine(new V2(backX, center.Y + r + k));
+                sink.EndFigure(FigureEnd.Closed);
+                sink.Close();
             }
-            else
-            {
-                dc.DrawLine(new V2(center.X - r, center.Y - r), new V2(center.X + r, center.Y), ink, w, res.RoundStroke);
-                dc.DrawLine(new V2(center.X + r, center.Y), new V2(center.X - r, center.Y + r), ink, w, res.RoundStroke);
-            }
+            using (geo) dc.FillGeometry(geo, ink);
             dc.PopAxisAlignedClip();
         }
     }
