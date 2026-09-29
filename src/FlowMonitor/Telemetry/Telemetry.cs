@@ -95,54 +95,15 @@ public sealed class Telemetry : IDisposable
     /// <summary>Seconds since this instance was created. Monotonic, high resolution.</summary>
     public double Time => _clock.Elapsed.TotalSeconds;
 
-    /// <summary>Wraps a raw Win32 HANDLE in a <see cref="WaitHandle"/> so it can be used with WaitHandle.WaitAny.</summary>
-    sealed class RawWaitHandle : WaitHandle
-    {
-        public RawWaitHandle(IntPtr handle) => SafeWaitHandle = new Microsoft.Win32.SafeHandles.SafeWaitHandle(handle, false);
-    }
-
+    // A plain sleep loop: the 1 Hz cadence never needed the high-resolution waitable
+    // timer, and the timer branch was the only user of the handle wrapper here.
     void Loop()
     {
-        var timer = Native.CreateWaitableTimerExW(IntPtr.Zero, null,
-            Native.CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, Native.TIMER_ALL_ACCESS);
-        if (timer == IntPtr.Zero)
-        {
-            // Fall back to a plain sleep loop if the high-resolution timer is unavailable.
-            while (_running)
-            {
-                if (_stop.Wait(IntervalMs)) break;
-                if (_running) SampleOnce();
-            }
-            return;
-        }
-
-        var handles = new[] { (WaitHandle)new RawWaitHandle(timer), _stop.WaitHandle };
-        const int WAIT_OBJECT_0 = 0;
-
         while (_running)
         {
-            try
-            {
-                int interval = IntervalMs;
-                long due = -Math.Max(1, interval) * 10_000;   // 100 ns units, relative
-                if (!Native.SetWaitableTimer(timer, ref due, 0, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero, 0))
-                {
-                    if (_stop.Wait(interval)) break;
-                }
-                else
-                {
-                    int r = WaitHandle.WaitAny(handles, interval + 500);
-                    if (r != WAIT_OBJECT_0) break;          // stop signalled or timed out
-                }
-
-                if (!_running) break;
-                SampleOnce();
-            }
-            catch { if (_stop.Wait(500)) break; }
+            if (_stop.Wait(IntervalMs)) break;
+            if (_running) SampleOnce();
         }
-
-        Native.CancelWaitableTimer(timer);
-        Native.CloseHandle(timer);
     }
 
     /// <summary>
