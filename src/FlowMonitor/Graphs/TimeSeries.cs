@@ -72,21 +72,16 @@ public sealed class TimeSeries
     }
 
     /// <summary>Highest value inside the visible window (peak hold).</summary>
-    public float Peak(double windowStart)
-    {
-        float max = float.MinValue;
-        for (int i = 0; i < _count; i++)
-            if (TimeAt(i) >= windowStart)
-                max = Math.Max(max, ValueAt(i));
-        return max == float.MinValue ? 0f : max;
-    }
+    public float Peak(double windowStart) => Scan(windowStart, float.MinValue, Math.Max);
 
-    public float Min(double windowStart)
+    public float Min(double windowStart) => Scan(windowStart, float.MaxValue, Math.Min);
+
+    float Scan(double windowStart, float seed, Func<float, float, float> fold)
     {
-        float min = float.MaxValue;
+        float acc = seed;
         for (int i = 0; i < _count; i++)
             if (TimeAt(i) >= windowStart)
-                min = Math.Min(min, ValueAt(i));
-        return min == float.MaxValue ? 0f : min;
+                acc = fold(acc, ValueAt(i));
+        return acc is float.MinValue or float.MaxValue ? 0f : acc;
     }
 }

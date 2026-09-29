@@ -13,8 +13,7 @@ public sealed unsafe class NetworkSampler
 {
     readonly Metrics.Telemetry _tel;
     readonly int _stride = Marshal.SizeOf<MIB_IF_ROW2>();
-    readonly Dictionary<ulong, ulong> _prevIn = new();
-    readonly Dictionary<ulong, ulong> _prevOut = new();
+    readonly Dictionary<ulong, (ulong In, ulong Out)> _prev = new();
     readonly double[] _inRate = new double[64];
     readonly double[] _outRate = new double[64];
 
@@ -93,30 +92,28 @@ public sealed unsafe class NetworkSampler
 
             // LUID is 64-bit; key on the full value to avoid interface collisions.
             ulong key = row.InterfaceLuid;
-            if (_prevIn.TryGetValue(key, out ulong pIn) && _prevOut.TryGetValue(key, out ulong pOut))
+            if (_prev.TryGetValue(key, out var p))
             {
                 // Backwards counters mean interface reset; report idle, not a spike.
-                _inRate[i] = row.InOctets >= pIn ? (row.InOctets - pIn) / interval : 0;
-                _outRate[i] = row.OutOctets >= pOut ? (row.OutOctets - pOut) / interval : 0;
+                _inRate[i] = row.InOctets >= p.In ? (row.InOctets - p.In) / interval : 0;
+                _outRate[i] = row.OutOctets >= p.Out ? (row.OutOctets - p.Out) / interval : 0;
             }
             else
             {
                 _inRate[i] = 0; _outRate[i] = 0;
             }
-            _prevIn[key] = row.InOctets;
-            _prevOut[key] = row.OutOctets;
+            _prev[key] = (row.InOctets, row.OutOctets);
         }
         for (int i = limit; i < _inRate.Length; i++) { _inRate[i] = 0; _outRate[i] = 0; }
 
         // Drop baselines for vanished interfaces.
-        if (_prevIn.Count > NumRows * 4)
+        if (_prev.Count > NumRows * 4)
         {
             var live = new HashSet<ulong>();
             for (int i = 0; i < limit; i++) live.Add(Row(i).InterfaceLuid);
-            foreach (var k in _prevIn.Keys.Where(k => !live.Contains(k)).ToList())
+            foreach (var k in _prev.Keys.Where(k => !live.Contains(k)).ToList())
             {
-                _prevIn.Remove(k);
-                _prevOut.Remove(k);
+                _prev.Remove(k);
             }
         }
 

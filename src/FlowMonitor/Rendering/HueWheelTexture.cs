@@ -70,16 +70,12 @@ float4 PSMain(VSOut i) : SV_Target
     return float4(rgb * a, a);
 }
 ";
-    /// <summary>True when the last successful Build came from the shader, not the fallback.</summary>
-    public static bool LastUsedShader { get; private set; }
-
     /// <summary>
     /// Renders an n-by-n wheel. Returns null when the shader will not build, so the
     /// caller keeps a CPU fallback rather than losing the control.
     /// </summary>
     public static ID2D1Bitmap1? Build(RenderDevice dev, ID2D1DeviceContext dc, int n, bool linear)
     {
-        LastUsedShader = false;
         var d3d = dev.D3DDevice;
         var ctx = dev.D3DContext;
         string source = (linear ? "#define LINEAR_SPACE 1\n" : "") + Common;
@@ -151,7 +147,7 @@ float4 PSMain(VSOut i) : SV_Target
             var box = ctx.Map(staging, 0, MapMode.Read, Vortice.Direct3D11.MapFlags.None);
             try
             {
-                ID2D1Bitmap1? bmp = dc.CreateBitmap(
+                return dc.CreateBitmap(
                     new Vortice.Mathematics.SizeI(n, n), box.DataPointer, (uint)box.RowPitch,
                     new Vortice.Direct2D1.BitmapProperties1
                     {
@@ -160,8 +156,6 @@ float4 PSMain(VSOut i) : SV_Target
                         DpiX = 96,
                         DpiY = 96,
                     });
-                LastUsedShader = bmp is not null;
-                return bmp;
             }
             finally { ctx.Unmap(staging, 0); }
         }

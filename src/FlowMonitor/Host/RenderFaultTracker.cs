@@ -16,12 +16,6 @@ internal sealed class RenderFaultTracker<TKey> where TKey : notnull
         _retireAfter = retireAfter;
     }
 
-    /// <summary>Consecutive faults required before a widget is retired.</summary>
-    public int RetireAfter => _retireAfter;
-
-    /// <summary>How many distinct widgets are currently misbehaving. Drives log throttling.</summary>
-    public int TrackedCount => _counts.Count;
-
     /// <summary>Whether a fault at this count should be logged (throttled past 3 widgets).</summary>
     public bool ShouldLog(int faultNo) => _counts.Count <= 3 || faultNo % 60 == 1;
 
@@ -44,6 +38,4 @@ internal sealed class RenderFaultTracker<TKey> where TKey : notnull
 
     /// <summary>Stop tracking a widget entirely (after teardown, or on shutdown).</summary>
     public void Forget(TKey key) => _counts.Remove(key);
-
-    public void Clear() => _counts.Clear();
 }

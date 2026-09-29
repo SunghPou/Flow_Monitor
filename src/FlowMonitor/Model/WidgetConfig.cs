@@ -26,25 +26,6 @@ public enum ClickThroughMode
 
     /// <summary>Left button and drag fall through; right button still reaches the widget.</summary>
     LeftClickOnly = 1,
-
-    /// <summary>
-    /// Left button falls through by explicit forwarding; right button still reaches the widget.
-    /// Kept for saved-config compat; behaviorally the same as LeftClickOnly.
-    /// </summary>
-    Full = 2,
-}
-
-public enum GraphLayout
-{
-    Single,
-    /// <summary>One large graph plus a stack of small ones.</summary>
-    PrimaryPlusStack,
-    /// <summary>2x2 grid of graphs.</summary>
-    Grid2x2,
-    /// <summary>3x3 grid of graphs.</summary>
-    Grid3x3,
-    /// <summary>All graphs tiled vertically.</summary>
-    Column,
 }
 
 /// <summary>Per-widget persistent state. Everything the context menu can change lives here.</summary>
@@ -60,15 +41,10 @@ public sealed class WidgetConfig
 
     // content
     public GraphKind Graph { get; set; } = GraphKind.Cpu;
-    public GraphLayout Layout { get; set; } = GraphLayout.Single;
 
     // appearance
     public int Transparency { get; set; } = 12;      // 0 = opaque, 100 = invisible
-    public int BlurIntensity { get; set; } = 60;     // 0..100 acrylic/mica strength
     public string AccentHex { get; set; } = "#4CC2FF";
-
-    /// <summary>Backdrop material. 0 none / 1 blur-behind / 2 mica / 3 acrylic.</summary>
-    public int Backdrop { get; set; } = 2;
 
     // Per-kind line colours (spec: accent + individual graph line colours).
     // The Cores variants fall back to their base kind inside LineColorFor.
@@ -98,11 +74,8 @@ public sealed class WidgetConfig
     public bool SlidingGraphs { get; set; } = true;
     public bool ShowLabels { get; set; } = true;
     public bool ShowUnits { get; set; } = true;
-    public bool ShowPeakMarker { get; set; } = true;
     public bool ShowMinMax { get; set; } = false;
     public int CornerRadius { get; set; } = 8;
-    public float ShadowIntensity { get; set; } = 0.35f;
-    public bool AlwaysOnTop { get; set; } = false;
 
     // behaviour
     public int UpdateIntervalMs { get; set; } = 1000;
@@ -121,8 +94,6 @@ public sealed class WidgetConfig
     /// See <see cref="ClickThroughMode"/> for why this exists at all.
     /// </summary>
     public ClickThroughMode ClickThrough { get; set; } = ClickThroughMode.LeftClickOnly;
-
-    [JsonIgnore] public bool EditMode { get; set; }
 
     /// <summary>Set by the widget at runtime; never persisted.</summary>
     [JsonIgnore] public float Dpi { get; set; } = 1f;

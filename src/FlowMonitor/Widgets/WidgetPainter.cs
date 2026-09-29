@@ -71,6 +71,26 @@ public static class WidgetPainter
     public static void PaintCheckMark(ID2D1DeviceContext dc, ResourceCache res, WidgetConfig cfg,
         float width, float height, System.Drawing.RectangleF boxLogical, float amount,
         float hover = 0f)
+        => PaintBadge(dc, res, cfg, width, height, boxLogical, amount, hover, 1f,
+            (c, h) => GlyphGeometry.Check(c, h));
+
+    /// <summary>
+    /// X badge at the head of the tick column with the same ease as the check. Glyph only.
+    /// </summary>
+    public static void PaintCloseButton(ID2D1DeviceContext dc, ResourceCache res, WidgetConfig cfg,
+        float width, float height, System.Drawing.RectangleF boxLogical, float amount,
+        float hover = 0f)
+        => PaintBadge(dc, res, cfg, width, height, boxLogical, amount, hover, XOpticalScale,
+            (c, h) => GlyphGeometry.X(c, h));
+
+    /// <summary>
+    /// Shared badge body: clip, ease, one filled outline at the standard weight.
+    /// The X passes <see cref="XOpticalScale"/> because a 45-degree bar covers more area
+    /// than the tick at the same ink extent, so equal extents still read as a heavier X.
+    /// </summary>
+    static void PaintBadge(ID2D1DeviceContext dc, ResourceCache res, WidgetConfig cfg,
+        float width, float height, System.Drawing.RectangleF boxLogical, float amount,
+        float hover, float optical, Action<V2, float> draw)
     {
         if (amount <= 0.01f || boxLogical.Width <= 0) return;
         float s = cfg.Dpi;
@@ -82,38 +102,9 @@ public static class WidgetPainter
 
         dc.PushAxisAlignedClip(new RectF(0, 0, width, height), AntialiasMode.Aliased);
 
-        // One filled outline at the standard weight, so the tick carries the same bar
-        // width as the X instead of reading thin next to it.
-        float half = size * BadgeInk;
+        float half = size * BadgeInk * optical;
         var glyph = res.Brush(new Color4(1f, 1f, 1f, amount * (0.5f + 0.5f * hover)));
-        FillAll(dc, GlyphGeometry.Build(res, () => GlyphGeometry.Check(center, half)), glyph);
-        dc.PopAxisAlignedClip();
-    }
-
-    /// <summary>
-    /// X badge at the head of the tick column with the same ease as the check. Glyph only.
-    /// </summary>
-    public static void PaintCloseButton(ID2D1DeviceContext dc, ResourceCache res, WidgetConfig cfg,
-        float width, float height, System.Drawing.RectangleF boxLogical, float amount,
-        float hover = 0f)
-    {
-        if (amount <= 0.01f || boxLogical.Width <= 0) return;
-        float s = cfg.Dpi;
-        float ease = Ease(amount);
-        float size = WidgetWindow.CheckMarkSize * s * (0.70f + 0.30f * ease);
-
-        var center = new V2((boxLogical.Left + boxLogical.Width * 0.5f) * s,
-            (boxLogical.Top + boxLogical.Height * 0.5f) * s);
-
-        dc.PushAxisAlignedClip(new RectF(0, 0, width, height), AntialiasMode.Aliased);
-
-        // One filled outline at the standard weight: two crossing strokes double-composite
-        // where they meet, and a short fat one reads as a blob. The cross is drawn a little
-        // smaller than its reserved box: a 45-degree bar covers more area than the tick at
-        // the same ink extent, so equal ink extents still read as a heavier X.
-        float half = size * BadgeInk * XOpticalScale;
-        var glyph = res.Brush(new Color4(1f, 1f, 1f, amount * (0.5f + 0.5f * hover)));
-        FillAll(dc, GlyphGeometry.Build(res, () => GlyphGeometry.X(center, half)), glyph);
+        FillAll(dc, GlyphGeometry.Build(res, () => draw(center, half)), glyph);
         dc.PopAxisAlignedClip();
     }
 

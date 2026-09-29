@@ -175,6 +175,32 @@ public sealed class WidgetSurface : IDisposable
     /// Diagnostics only; not on the widget render path.
     /// </summary>
     public unsafe void CaptureToBmp(RenderDevice device, string path)
+        => WithMappedBackBuffer(device, (ptr, pitch) => WriteBmp24(path, (byte*)ptr, pitch, _width, _height));
+
+    /// <summary>
+    /// Same readback as <see cref="CaptureToBmp"/>, but returns tightly packed top-down BGRA pixels.
+    /// </summary>
+    public unsafe byte[] CaptureToPixels(RenderDevice device)
+        => WithMappedBackBuffer(device, (ptr, pitch) =>
+        {
+            int stride = _width * 4;
+            var packed = new byte[stride * _height];
+            for (int y = 0; y < _height; y++)
+            {
+                fixed (byte* dst = &packed[y * stride])
+                {
+                    Buffer.MemoryCopy((byte*)ptr + y * (int)pitch, dst, stride, stride);
+                }
+            }
+            return packed;
+        });
+
+    /// <summary>Stages the back buffer and maps it for CPU read; both captures share this.</summary>
+    unsafe void WithMappedBackBuffer(RenderDevice device, Action<IntPtr, uint> use)
+        => WithMappedBackBuffer<object?>(device, (ptr, pitch) => { use(ptr, pitch); return null; });
+
+    /// <summary>Stages the back buffer and maps it for CPU read; both captures share this.</summary>
+    unsafe T WithMappedBackBuffer<T>(RenderDevice device, Func<IntPtr, uint, T> use)
     {
         // D2D context does not expose ID3D11Device; use the RenderDevice's.
         var d3dDevice = device.D3DDevice;
@@ -203,55 +229,7 @@ public sealed class WidgetSurface : IDisposable
         var mapped = immediate.Map(staging, 0, MapMode.Read, Vortice.Direct3D11.MapFlags.None);
         try
         {
-            WriteBmp24(path, (byte*)mapped.DataPointer, mapped.RowPitch, _width, _height);
-        }
-        finally
-        {
-            immediate.Unmap(staging, 0);
-        }
-    }
-
-    /// <summary>
-    /// Same readback as <see cref="CaptureToBmp"/>, but returns tightly packed top-down BGRA pixels.
-    /// </summary>
-    public unsafe byte[] CaptureToPixels(RenderDevice device)
-    {
-        var d3dDevice = device.D3DDevice;
-        var immediate = device.D3DContext;
-
-        var backBuffer = _swapChain!.GetBuffer<IDXGISurface>(0).QueryInterfaceOrNull<ID3D11Texture2D>()
-            ?? throw new InvalidOperationException("capture: swap chain buffer is not a D3D11 texture");
-
-        var desc = new Texture2DDescription
-        {
-            Width = (uint)_width,
-            Height = (uint)_height,
-            MipLevels = 1,
-            ArraySize = 1,
-            Format = BackBufferFormat,
-            SampleDescription = new SampleDescription(1, 0),
-            Usage = ResourceUsage.Staging,
-            BindFlags = BindFlags.None,
-            CPUAccessFlags = CpuAccessFlags.Read,
-            MiscFlags = ResourceOptionFlags.None,
-        };
-
-        using var staging = d3dDevice.CreateTexture2D(in desc);
-        immediate.CopyResource(staging, backBuffer);
-
-        var mapped = immediate.Map(staging, 0, MapMode.Read, Vortice.Direct3D11.MapFlags.None);
-        try
-        {
-            int stride = _width * 4;
-            var packed = new byte[stride * _height];
-            for (int y = 0; y < _height; y++)
-            {
-                fixed (byte* dst = &packed[y * stride])
-                {
-                    Buffer.MemoryCopy((byte*)mapped.DataPointer + y * (int)mapped.RowPitch, dst, stride, stride);
-                }
-            }
-            return packed;
+            return use(mapped.DataPointer, mapped.RowPitch);
         }
         finally
         {

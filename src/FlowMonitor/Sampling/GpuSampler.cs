@@ -22,8 +22,6 @@ public sealed class GpuSampler
     public sealed class Adapter
     {
         public required string Luid { get; init; }
-        public int PhysicalDevice { get; init; }
-        public string Name => PhysicalDevice == 0 ? $"GPU {Luid}" : $"GPU {Luid} (phys {PhysicalDevice})";
     }
 
     /// <summary>One engine type's utilisation, already summed across processes and devices.</summary>
@@ -112,16 +110,16 @@ public sealed class GpuSampler
         // ---- engines -------------------------------------------------------------------
         // Instances come and go with processes; accumulate into a fresh map each tick.
         var byType = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
-        var adapters = new Dictionary<string, int>(StringComparer.Ordinal);
+        var adapters = new HashSet<string>(StringComparer.Ordinal);
         int seen = 0;
 
         _engines!.ReadAll((name, value) =>
         {
             seen++;
-            if (!TryParseEngine(name, out string luid, out int phys, out string engType)) return;
+            if (!TryParseEngine(name, out string luid, out string engType)) return;
             byType.TryGetValue(engType, out double running);
             byType[engType] = running + value;          // summed across pids, phys and engine units
-            adapters[luid] = phys;
+            adapters.Add(luid);
         });
 
         // Zero instances means not yet primed; hold the previous value.
@@ -132,8 +130,8 @@ public sealed class GpuSampler
             engineList.Add(new EngineType(NormaliseEngineName(kv.Key), kv.Value));
 
         var adapterList = new List<Adapter>(adapters.Count);
-        foreach (var kv in adapters.OrderBy(k => k.Key, StringComparer.Ordinal))
-            adapterList.Add(new Adapter { Luid = kv.Key, PhysicalDevice = kv.Value });
+        foreach (string luid in adapters.OrderBy(k => k, StringComparer.Ordinal))
+            adapterList.Add(new Adapter { Luid = luid });
 
         lock (_listGate)
         {
@@ -182,10 +180,9 @@ public sealed class GpuSampler
     /// Splits <c>pid_..._luid_..._phys_..._eng_..._engtype_...</c> into parts.
     /// Instance names are undocumented; non-matching names are skipped.
     /// </summary>
-    static bool TryParseEngine(string name, out string luid, out int phys, out string engType)
+    static bool TryParseEngine(string name, out string luid, out string engType)
     {
         luid = "";
-        phys = 0;
         engType = "";
         if (string.IsNullOrEmpty(name)) return false;
 
@@ -200,7 +197,7 @@ public sealed class GpuSampler
         int engIdx = name.IndexOf("_eng_", eng, StringComparison.Ordinal);
         if (engIdx < 0) return false;
         eng += 6;
-        if (!int.TryParse(name[eng..engIdx], NumberStyles.Integer, CultureInfo.InvariantCulture, out phys))
+        if (!int.TryParse(name[eng..engIdx], NumberStyles.Integer, CultureInfo.InvariantCulture, out _))
             return false;
 
         int typeAt = name.IndexOf("_engtype_", engIdx, StringComparison.Ordinal);

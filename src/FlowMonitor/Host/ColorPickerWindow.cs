@@ -811,12 +811,10 @@ internal static class ColorPickerWindow
                 for (int i = 0; i < _wheelBmp.Length; i++) { _wheelBmp[i]?.Dispose(); _wheelBmp[i] = null; }
             // The shader draws the wheel; the CPU loop is the fallback for a machine
             // where the shader will not build.
-            _wheelBmp[space] = _host is null
-                ? MakeWheel(dc, n, _space)
-                : FlowMonitor.Rendering.HueWheelTexture.Build(_host.Device, dc, n, _space == PickerSpace.Linear)
-                    ?? MakeWheel(dc, n, _space);
-            Log.Info("picker: wheel drawn by "
-                + (FlowMonitor.Rendering.HueWheelTexture.LastUsedShader ? "shader" : "cpu"));
+            var bmp = _host is null ? null
+                : FlowMonitor.Rendering.HueWheelTexture.Build(_host.Device, dc, n, _space == PickerSpace.Linear);
+            _wheelBmp[space] = bmp ?? MakeWheel(dc, n, _space);
+            Log.Info("picker: wheel drawn by " + (bmp is null ? "cpu" : "shader"));
             _wheelPx = n;
         }
     }

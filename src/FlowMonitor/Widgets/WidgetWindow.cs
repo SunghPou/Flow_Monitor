@@ -140,7 +140,7 @@ public sealed class WidgetWindow
 
     /// <summary>
     /// Forwards left-button to the window underneath when locked, so icons stay selectable.
-    /// Runs for LeftClickOnly and Full; Off swallows, editing never forwards. Target found via
+    /// Runs for LeftClickOnly; Off swallows, editing never forwards. Target found via
     /// temporary WS_EX_TRANSPARENT + WindowFromPoint, translated to client coords.
     /// </summary>
     public void ForwardLeftClickToWindowBelow(bool isUp)

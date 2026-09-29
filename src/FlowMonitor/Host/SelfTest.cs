@@ -1150,14 +1150,28 @@ public static class SelfTest
                             "leaving edit mode re-locks the widget without making it transparent",
                             $"editing={w.IsEditing} transparent={Transparent()}");
 
-                        // Config changes must reach the window style immediately.
-                        // Full stays hittestable so right-click still re-enters edit mode.
-                        var full = cfg.Clone();
-                        full.ClickThrough = ClickThroughMode.Full;
-                        w.UpdateConfig(full);
-                        Check(!Transparent(),
-                            "Full click-through stays hittestable so right-click can re-enter edit mode",
-                            "ClickThrough=Full while locked left WS_EX_TRANSPARENT clear");
+                        // A config saved with the retired Full value (2) loads as
+                        // LeftClickOnly, which behaved the same; the dead value never
+                        // round-trips back to disk.
+                        string migDir = System.IO.Path.Combine(
+                            System.IO.Path.GetTempPath(), "flowmonitor-selftest-migrate");
+                        System.IO.Directory.CreateDirectory(migDir);
+                        foreach (var f in System.IO.Directory.GetFiles(migDir, "*.json"))
+                            System.IO.File.Delete(f);
+                        string? priorMig = Model.WidgetStore.DirectoryOverride;
+                        Model.WidgetStore.DirectoryOverride = migDir;
+                        try
+                        {
+                            System.IO.File.WriteAllText(
+                                System.IO.Path.Combine(migDir, "old.json"),
+                                "{\"Id\":\"selftest-migrate\",\"ClickThrough\":2}");
+                            var loaded = Model.WidgetStore.LoadAll()
+                                .FirstOrDefault(c => c.Id == "selftest-migrate");
+                            Check(loaded is not null && loaded.ClickThrough == ClickThroughMode.LeftClickOnly,
+                                "retired Full click-through migrates to LeftClickOnly on load",
+                                loaded is null ? "config did not load" : $"ClickThrough={loaded.ClickThrough}");
+                        }
+                        finally { Model.WidgetStore.DirectoryOverride = priorMig; }
 
                         w.UpdateConfig(cfg);
                         Check(!Transparent(),

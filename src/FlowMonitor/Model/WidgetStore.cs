@@ -115,6 +115,10 @@ public static class WidgetStore
                     // Saved configs keep enum values stable, so a widget saved on the retired
                     // per-engine GPU card comes back as the single GPU card.
                     if (cfg.Graph == GraphKind.GpuCores) cfg.Graph = GraphKind.Gpu;
+                    // The retired Full click-through (2) behaved like LeftClickOnly;
+                    // normalise it so the dead value never round-trips back to disk.
+                    if (!Enum.IsDefined(cfg.ClickThrough))
+                        cfg.ClickThrough = ClickThroughMode.LeftClickOnly;
                     result.Add(cfg);
                 }
                 catch (Exception ex)
