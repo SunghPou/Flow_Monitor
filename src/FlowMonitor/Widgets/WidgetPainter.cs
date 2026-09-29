@@ -194,16 +194,18 @@ public static class WidgetPainter
                 for (int i = 1; i <= 6; i++)
                 {
                     int j = i % 6;
-                    // The inner notch stays sharp; every outer corner is rounded.
-                    if (j == 3) sink.AddLine(pts[3]);
-                    else
+                    // The inner notch stays sharp; every other corner is a parabola
+                    // subdivided into line segments: one filled region either way,
+                    // and lines are the proven primitive here.
+                    if (j == 3) { sink.AddLine(pts[3]); continue; }
+                    var a = Corner(j, -1);
+                    var v = Corner(j, 0);
+                    var e = Corner(j, 1);
+                    sink.AddLine(a);
+                    for (int sgm = 1; sgm <= 4; sgm++)
                     {
-                        sink.AddLine(Corner(j, -1));
-                        sink.AddQuadraticBezier(new QuadraticBezierSegment
-                        {
-                            Point1 = Corner(j, 0),
-                            Point2 = Corner(j, 1),
-                        });
+                        float u = sgm / 4f, w0 = (1f - u) * (1f - u), w1 = 2f * (1f - u) * u, w2 = u * u;
+                        sink.AddLine(new V2(a.X * w0 + v.X * w1 + e.X * w2, a.Y * w0 + v.Y * w1 + e.Y * w2));
                     }
                 }
                 sink.EndFigure(FigureEnd.Closed);
