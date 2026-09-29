@@ -1173,6 +1173,67 @@ public static class SelfTest
                         }
                         finally { Model.WidgetStore.DirectoryOverride = priorMig; }
 
+                        // The app registers its own Start Menu link; ensuring twice is
+                        // idempotent and the link points at this exe.
+                        StartMenuLink.Ensure();
+                        Check(System.IO.File.Exists(StartMenuLink.LinkPath()),
+                            "the app leaves a Start Menu link to itself",
+                            StartMenuLink.LinkPath());
+
+                        // The store is single-rooted: bin-adjacent configs move over once,
+                        // and only into an empty local store.
+                        {
+                            string legacyDir = System.IO.Path.Combine(
+                                System.IO.Path.GetTempPath(), "flowmonitor-selftest-legacy");
+                            string localDir = System.IO.Path.Combine(
+                                System.IO.Path.GetTempPath(), "flowmonitor-selftest-local");
+                            System.IO.Directory.CreateDirectory(legacyDir);
+                            System.IO.Directory.CreateDirectory(localDir);
+                            foreach (var f in System.IO.Directory.GetFiles(legacyDir, "*.json"))
+                                System.IO.File.Delete(f);
+                            foreach (var f in System.IO.Directory.GetFiles(localDir, "*.json"))
+                                System.IO.File.Delete(f);
+                            string? priorDir = Model.WidgetStore.DirectoryOverride;
+                            string? priorLegacy = Model.WidgetStore.LegacyDirectoryOverride;
+                            try
+                            {
+                                System.IO.File.WriteAllText(
+                                    System.IO.Path.Combine(legacyDir, "old.json"),
+                                    "{\"Id\":\"selftest-legacy\",\"Graph\":0}");
+                                // Non-empty local store: migration stays out.
+                                System.IO.File.WriteAllText(
+                                    System.IO.Path.Combine(localDir, "mine.json"),
+                                    "{\"Id\":\"selftest-local\",\"Graph\":0}");
+                                Model.WidgetStore.LegacyDirectoryOverride = legacyDir;
+                                Model.WidgetStore.DirectoryOverride = localDir;
+                                Model.WidgetStore.MigrateLegacyStore();
+                                Check(!System.IO.File.Exists(System.IO.Path.Combine(localDir, "old.json")),
+                                    "migration never merges over an existing local store",
+                                    "local store kept mine.json only");
+                                System.IO.File.Delete(System.IO.Path.Combine(localDir, "mine.json"));
+                                Model.WidgetStore.MigrateLegacyStore();
+                                bool migrated = System.IO.File.Exists(System.IO.Path.Combine(localDir, "old.json"))
+                                    && !System.IO.File.Exists(System.IO.Path.Combine(legacyDir, "old.json"));
+                                Check(migrated,
+                                    "bin-adjacent configs migrate into the empty local store",
+                                    migrated ? "old.json moved over" : "old.json did not move");
+                            }
+                            finally
+                            {
+                                Model.WidgetStore.DirectoryOverride = priorDir;
+                                Model.WidgetStore.LegacyDirectoryOverride = priorLegacy;
+                            }
+                        }
+
+                        // Auto-start round-trips through its own registry key, never the live one.
+                        AutoStart.SetFor("FlowMonitorSelfTest", true);
+                        bool autoOn = AutoStart.EnabledFor("FlowMonitorSelfTest");
+                        AutoStart.SetFor("FlowMonitorSelfTest", false);
+                        bool autoOff = !AutoStart.EnabledFor("FlowMonitorSelfTest");
+                        Check(autoOn && autoOff,
+                            "start-with-Windows persists as a per-user Run value",
+                            $"on={autoOn} off={autoOff}");
+
                         w.UpdateConfig(cfg);
                         Check(!Transparent(),
                             "changing it back to LeftClickOnly clears the style again",

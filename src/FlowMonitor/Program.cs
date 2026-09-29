@@ -7,6 +7,33 @@ internal static class Program
 {
     const string MutexName = "FlowMonitor.SingleInstance.v1";
 
+    /// <summary>
+    /// Waits until no other instance owns the widgets. True when the mutex is free
+    /// (or was abandoned by a dead owner, which also transfers ownership to us).
+    /// </summary>
+    static bool WaitForPreviousInstance(TimeSpan timeout)
+    {
+        DesktopHost.SignalRunningInstanceToExit();
+        try
+        {
+            using var m = new Mutex(false, MutexName);
+            try
+            {
+                if (!m.WaitOne(timeout)) return false;
+            }
+            catch (AbandonedMutexException)
+            {
+                // Dead owner: we hold the mutex now.
+            }
+            m.ReleaseMutex();
+            return true;
+        }
+        catch
+        {
+            return true;
+        }
+    }
+
     [STAThread]
     private static int Main(string[] args)
     {
@@ -46,8 +73,18 @@ internal static class Program
             return 0;
         }
 
+        // Tray Restart: the old instance was signalled to exit; wait for its mutex so
+        // two owners never exist, then start normally. A missing old instance falls
+        // through immediately and this degrades to a plain start.
+        if (args.Contains("--replace") && !WaitForPreviousInstance(TimeSpan.FromSeconds(15)))
+        {
+            Log.Warn("--replace: previous instance did not exit in time.");
+            return 3;
+        }
+
         try
         {
+            StartMenuLink.Ensure();
             using var host = new DesktopHost();
             host.Run(args);
             return 0;

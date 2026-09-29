@@ -497,4 +497,64 @@ internal static class Native
     [System.Runtime.InteropServices.DllImport("user32.dll")]
     public static extern short GetAsyncKeyState(int vKey);
     public const int VK_RETURN = 0x0D;
+
+    // ------------------------------------------------------------------ tray icon + popup menu
+    public const uint NIM_ADD = 0;
+    public const uint NIM_MODIFY = 1;
+    public const uint NIM_DELETE = 2;
+    public const uint NIF_MESSAGE = 1;
+    public const uint NIF_ICON = 2;
+    public const uint NIF_TIP = 4;
+    public const uint WM_NULL = 0;
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    public struct NOTIFYICONDATAW
+    {
+        public uint cbSize;
+        public IntPtr hWnd;
+        public uint uID;
+        public uint uFlags;
+        public uint uCallbackMessage;
+        public IntPtr hIcon;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)] public string szTip;
+        public uint dwState;
+        public uint dwStateMask;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 256)] public string szInfo;
+        public uint uTimeoutOrVersion;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 64)] public string szInfoTitle;
+        public uint dwInfoFlags;
+        public Guid guidItem;
+        public IntPtr hBalloonIcon;
+    }
+
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    public static extern bool Shell_NotifyIconW(uint dwMessage, ref NOTIFYICONDATAW lpData);
+
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    public static extern IntPtr ExtractIconW(IntPtr hInst, string lpszExeFileName, uint nIconIndex);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern bool DestroyIcon(IntPtr hIcon);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern IntPtr LoadIconW(IntPtr hInstance, IntPtr lpIconName);
+
+    public const uint MF_STRING = 0;
+    public const uint MF_SEPARATOR = 0x800;
+    public const uint MF_CHECKED = 8;
+    public const uint TPM_RETURNCMD = 0x100;
+    public const uint TPM_RIGHTBUTTON = 0x2;
+
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern IntPtr CreatePopupMenu();
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    public static extern bool AppendMenuW(IntPtr hMenu, uint uFlags, nuint uIDNewItem, string lpNewItem);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern uint TrackPopupMenu(IntPtr hMenu, uint uFlags, int x, int y,
+        int nReserved, IntPtr hWnd, IntPtr prcRect);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern bool DestroyMenu(IntPtr hMenu);
 }

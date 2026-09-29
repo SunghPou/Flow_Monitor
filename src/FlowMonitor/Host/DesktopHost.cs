@@ -121,6 +121,7 @@ public sealed class DesktopHost : IRenderHost, IDisposable
         _current = this;
         RegisterClasses();
         CreateControlWindow();
+        TrayIcon.Add(_controlWnd);
         _telemetry.Start();
 
         _workerW = Desktop.FindWorkerW();
@@ -130,6 +131,7 @@ public sealed class DesktopHost : IRenderHost, IDisposable
 
         // Saved widgets always come back locked; a fresh default (no saves on disk)
         // starts in edit mode.
+        WidgetStore.MigrateLegacyStore();
         var saved = WidgetStore.LoadAll();
         if (saved.Count == 0)
         {
@@ -240,12 +242,24 @@ public sealed class DesktopHost : IRenderHost, IDisposable
             if (host is not null) host.DrainHwndDestroyQueue();
         }
 
+        if (msg == TrayIcon.CallbackMessage)
+        {
+            var host = _current;
+            if (host is not null && TrayIcon.OnCallback(host, lParam)) return IntPtr.Zero;
+        }
+
+        if (msg == TrayIcon.TaskbarCreated)
+        {
+            // Explorer restarted: the notification area forgot the icon.
+            var host = _current;
+            if (host is not null) TrayIcon.ReAdd(host._controlWnd);
+            return IntPtr.Zero;
+        }
+
         return Native.DefWindowProcW(hwnd, msg, wParam, lParam);
     }
 
-    /// <summary>
-    /// Handle a "--new-widget" request: spawn one widget in edit mode, offset from existing ones.
-    /// </summary>
+    /// <summary>Handle a "--new-widget" request: spawn one widget in edit mode, offset from existing ones.</summary>
     void SpawnWidgetFromRequest()
     {
         var cfg = NewDefaultConfig();
@@ -256,7 +270,42 @@ public sealed class DesktopHost : IRenderHost, IDisposable
         }
         cfg.Id = Guid.NewGuid().ToString("N");
         if (AddWidget(cfg, editMode: true) is null)
-            Log.Write("WARN", "--new-widget request refused: already at the widget cap.");
+            Log.Write("WARN", "widget request refused: already at the widget cap.");
+    }
+
+    /// <summary>Handle the tray popup menu points at for foreground ownership.</summary>
+    internal IntPtr ControlHandle => _controlWnd;
+
+    /// <summary>Tray: one more widget, same as a --new-widget request.</summary>
+    internal void AddWidgetFromTray() => SpawnWidgetFromRequest();
+
+    /// <summary>Tray: start a replacement and shut this instance down like --kill would.</summary>
+    internal void Restart()
+    {
+        try
+        {
+            string exe = Environment.ProcessPath ?? "";
+            if (exe.Length == 0) return;
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = exe,
+                Arguments = "--replace",
+                UseShellExecute = true,
+            });
+        }
+        catch (Exception ex)
+        {
+            Log.Warn("restart: " + ex.Message);
+            return;
+        }
+        Exit();
+    }
+
+    /// <summary>Tray: graceful shutdown through the same signal --kill uses.</summary>
+    internal void Exit()
+    {
+        if (_killEvent != IntPtr.Zero) SetEvent(_killEvent);
+        else if (_controlWnd != IntPtr.Zero) PostMessage(_controlWnd, WM_CLOSE, IntPtr.Zero, IntPtr.Zero);
     }
 
     const uint WM_APP_RETIRE = 0x8001;
@@ -1310,6 +1359,8 @@ public sealed class DesktopHost : IRenderHost, IDisposable
 
         _telemetry.Sampled -= WakeWidgetsForNewSample;
         _telemetry.Dispose();
+        // The icon's callback targets the control window; pull it before destroying it.
+        TrayIcon.Remove();
         // Close the control channel before graphics teardown.
         if (_controlWnd != IntPtr.Zero) { DestroyWindow(_controlWnd); _controlWnd = IntPtr.Zero; }
         if (_killEvent != IntPtr.Zero) { CloseHandle(_killEvent); _killEvent = IntPtr.Zero; }

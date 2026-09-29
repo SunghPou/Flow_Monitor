@@ -14,6 +14,7 @@
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
     <DebugType>embedded</DebugType>
+    <ApplicationIcon>..\..\assets\flowmonitor.ico</ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup>

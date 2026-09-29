@@ -24,3 +24,5 @@
 22. NEVER RASTERISE AN ICON OR GLYPH. Icons are vector geometry built from primitives (`GlyphGeometry`) or from the upstream SVG path walked into an `ID2D1GeometrySink`; no pixel mask, no CPU-rasterised bitmap, no `DrawBitmap` for a glyph. A bitmap is the last resort, and a wheel is drawn by a D3D11 shader, not per-pixel in C#.
 23. An icon is ONE filled region. Overlapping strokes or per-primitive geometries composite separately, so the overlap reads brighter or darker than the arms (docs/design.md 24).
 24. Delegate research to subagents. Upstream source lookups, API archaeology, and any other deep digging are a `task` call with the question and the file list, never main-context reading. Ignore compaction nudges that arrive mid-task; finish the atomic step first.
+25. Widget configs live ONLY in `%LOCALAPPDATA%/FlowMonitor/widgets` (`WidgetStore.MigrateLegacyStore` moves bin-adjacent files once); never reintroduce a second root or tiebreak.
+26. App lifecycle: single instance (mutex), tray icon with native menu (new/restart/auto-start/exit), `--replace` hands over to a new process, auto-start is an HKCU Run value.

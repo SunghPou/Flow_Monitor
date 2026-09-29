@@ -22,28 +22,66 @@ public static class WidgetStore
     /// <summary>Test-only store root; null in the app. Set before a store round trip.</summary>
     internal static string? DirectoryOverride;
 
+    /// <summary>Previous bin-adjacent root, kept for the one-time migration below. Test seam.</summary>
+    internal static string? LegacyDirectoryOverride;
+
     /// <summary>Root the store settles on, after a writable probe and a config-count tiebreak.</summary>
     internal static string ResolvedDirectory => DirectoryOverride ?? Directory;
 
+    static string LegacyDirectory => LegacyDirectoryOverride
+        ?? Path.Combine(AppContext.BaseDirectory, "FlowMonitor", "widgets");
+
     /// <summary>
-    /// Picks the store root: every candidate must survive a real write probe, and a
-    /// candidate that already holds configs beats one that does not, so an existing
-    /// layout is never abandoned for an empty directory.
+    /// The store lives in exactly one place (%LOCALAPPDATA%\FlowMonitor\widgets), so a
+    /// stray file can never hijack widget resolution the way the old two-root tiebreak
+    /// allowed. Next to the binary is only a fallback when LocalAppData is not writable.
     /// </summary>
     static string ResolveDirectory()
     {
-        string? firstWritable = null;
-        foreach (var root in new[] { Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                                     AppContext.BaseDirectory })
+        string local = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "FlowMonitor", "widgets");
+        if (!string.IsNullOrEmpty(local) && Writable(local)) return local;
+        string bin = LegacyDirectory;
+        if (Writable(bin)) return bin;
+        return bin;
+    }
+
+    /// <summary>
+    /// One-time move of configs saved next to the binary into the single store root.
+    /// Runs only into an empty local store, so it can never merge over real user data;
+    /// leftovers stay put when a name collides. Override-aware, so the self test runs it
+    /// against temp directories.
+    /// </summary>
+    internal static void MigrateLegacyStore()
+    {
+        try
         {
-            if (string.IsNullOrEmpty(root)) continue;
-            string dir = Path.Combine(root, "FlowMonitor", "widgets");
-            if (!Writable(dir)) continue;
-            if (CountConfigs(dir) > 0) return dir;
-            firstWritable ??= dir;
+            string target = ResolvedDirectory;
+            string legacy = LegacyDirectory;
+            if (string.Equals(legacy, target, StringComparison.OrdinalIgnoreCase)) return;
+            if (!System.IO.Directory.Exists(legacy) || CountConfigs(target) > 0) return;
+            System.IO.Directory.CreateDirectory(target);
+            int moved = 0;
+            foreach (string file in System.IO.Directory.EnumerateFiles(legacy, "*.json"))
+            {
+                string dest = Path.Combine(target, Path.GetFileName(file));
+                try
+                {
+                    if (System.IO.File.Exists(dest)) continue;
+                    System.IO.File.Move(file, dest);
+                    moved++;
+                }
+                catch (Exception ex)
+                {
+                    Log.Warn("store migration skipped " + Path.GetFileName(file) + ": " + ex.Message);
+                }
+            }
+            if (moved > 0) Log.Info($"widget store: migrated {moved} config(s) next to the binary");
         }
-        if (firstWritable is not null) return firstWritable;
-        return Path.Combine(AppContext.BaseDirectory, "widgets");
+        catch (Exception ex)
+        {
+            Log.Warn("store migration failed: " + ex.Message);
+        }
     }
 
     /// <summary>Create + write + delete a probe file: an existing directory is not proof of access.</summary>
