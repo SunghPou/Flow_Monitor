@@ -172,6 +172,7 @@ internal static class ColorPickerWindow
         _alpha = Rgba.FromHex(startHex).A;
         _space = PickerSpace.Perceptual;
         _model = PickerModel.Hsv;
+        LoadModes();
 
         host.SetMenuOpen(true);
         try { Run(host, widget, x, y); }
@@ -179,6 +180,44 @@ internal static class ColorPickerWindow
 
         if (_cancelled || !_up) return null;
         return Current().ToHex();
+    }
+
+    /// <summary>
+    /// The card remembers its two mode rows between opens in a tiny picker.json next to
+    /// the widget configs: same atomic tmp+move write, corrupt file skipped, never fatal.
+    /// </summary>
+    static string ModesPath()
+        => Path.Combine(Model.WidgetStore.ResolvedDirectory, "picker.json");
+
+    /// <summary>Test seam: the live card reads these at open and writes them on segment clicks.</summary>
+    internal static (PickerSpace Space, PickerModel Model) ModesForTest => (_space, _model);
+
+    internal static void LoadModes()
+    {
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(File.ReadAllText(ModesPath()));
+            if (doc.RootElement.TryGetProperty("space", out var s) && s.GetInt32() == 0)
+                _space = PickerSpace.Linear;
+            if (doc.RootElement.TryGetProperty("model", out var m) && m.GetInt32() == 0)
+                _model = PickerModel.Rgb;
+        }
+        catch { }
+    }
+
+    internal static void SaveModes()
+    {
+        try
+        {
+            string path = ModesPath();
+            string tmp = $"{path}.{Environment.ProcessId}.tmp";
+            File.WriteAllText(tmp, $"{{\"space\":{(int)_space},\"model\":{(int)_model}}}");
+            File.Move(tmp, path, overwrite: true);
+        }
+        catch (Exception ex)
+        {
+            Log.Warn("picker modes save failed: " + ex.Message);
+        }
     }
 
     /// <summary>
@@ -341,6 +380,7 @@ internal static class ColorPickerWindow
             bool left = x < Picker.CardW / 2f;
             if (part == PickerPart.Space) _space = left ? PickerSpace.Linear : PickerSpace.Perceptual;
             else _model = left ? PickerModel.Rgb : PickerModel.Hsv;
+            SaveModes();
             Paint();
             return;
         }

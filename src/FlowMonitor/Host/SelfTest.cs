@@ -158,6 +158,39 @@ public static class SelfTest
                 }
             }
 
+            // The card remembers its mode rows: a saved file restores them, a corrupt
+            // one keeps the defaults, and the live statics are restored afterwards so
+            // later asserts still see the modes they painted with.
+            {
+                string dir = System.IO.Path.Combine(
+                    System.IO.Path.GetTempPath(), "flowmonitor-selftest-picker");
+                System.IO.Directory.CreateDirectory(dir);
+                string? priorStore = Model.WidgetStore.DirectoryOverride;
+                Model.WidgetStore.DirectoryOverride = dir;
+                var (priorSpace, priorModel) = ColorPickerWindow.ModesForTest;
+                try
+                {
+                    System.IO.File.WriteAllText(System.IO.Path.Combine(dir, "picker.json"),
+                        "{\"space\":0,\"model\":0}");
+                    ColorPickerWindow.LoadModes();
+                    var back = ColorPickerWindow.ModesForTest;
+                    Check(back.Space == PickerSpace.Linear && back.Model == PickerModel.Rgb,
+                        "the card restores its saved mode rows",
+                        $"file space=0 model=0 -> {back.Space}/{back.Model}");
+
+                    System.IO.File.WriteAllText(System.IO.Path.Combine(dir, "picker.json"), "{bad");
+                    ColorPickerWindow.LoadModes();   // corrupt file: keeps whatever stands, never throws
+                    Check(true, "a corrupt modes file never breaks the card", "LoadModes swallowed the bad JSON");
+                }
+                finally
+                {
+                    System.IO.File.WriteAllText(System.IO.Path.Combine(dir, "picker.json"),
+                        $"{{\"space\":{(int)priorSpace},\"model\":{(int)priorModel}}}");
+                    ColorPickerWindow.LoadModes();
+                    Model.WidgetStore.DirectoryOverride = priorStore;
+                }
+            }
+
             // ---- 3. charts that hit every drawing path -------------------------
             var charts = new[]
             {
