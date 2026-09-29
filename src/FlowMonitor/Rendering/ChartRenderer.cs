@@ -41,7 +41,6 @@ public sealed class ChartRenderer
     static readonly Color4 GridLineStrong = new(1f, 1f, 1f, 0.095f);
     static readonly Color4 AxisText = new(1f, 1f, 1f, 0.34f);
     static readonly Color4 TitleText = new(1f, 1f, 1f, 0.90f);
-    static readonly Color4 SubtitleText = new(1f, 1f, 1f, 0.46f);
     static readonly Color4 ValueText = new(1f, 1f, 1f, 1f);
     static readonly Color4 MinMaxText = new(1f, 1f, 1f, 0.42f);
     static readonly Color4 PeakLine = new(1f, 1f, 1f, 0.28f);
@@ -151,8 +150,6 @@ public sealed class ChartRenderer
                 header.Value.Width * s, header.Value.Height * s);
             dc.DrawText(FitValue(text, header.ValueMax, s), _res.HeaderValue, R(valueRect),
                 _res.Brush(ValueText));
-            // No subtitle: the header is title + value only. model.Subtitle is kept
-            // as data but never drawn.
         }
 
         // ---------------------------------------------------------------- plot rect

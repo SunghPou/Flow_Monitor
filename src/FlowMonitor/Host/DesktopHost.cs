@@ -896,7 +896,6 @@ public sealed class DesktopHost : IRenderHost, IDisposable
                 return new ChartModel
                 {
                     Title = "CPU",
-                    Subtitle = $"{cpu.CoreCount} logical processors",
                     Series = [new ChartSeries { Name = "CPU", Data = cpu.Total, Color = accent, Unit = "%" }],
                     AxisMax = 100,
                     PercentAxis = true,
@@ -926,7 +925,6 @@ public sealed class DesktopHost : IRenderHost, IDisposable
                 return new ChartModel
                 {
                     Title = "CPU",
-                    Subtitle = "per logical processor",
                     Series = list,
                     AxisMax = 100,
                     PercentAxis = true,
@@ -955,7 +953,6 @@ public sealed class DesktopHost : IRenderHost, IDisposable
                 return new ChartModel
                 {
                     Title = "RAM",
-                    Subtitle = $"{ChartRenderer.FormatBytes(committed)} committed",
                     Series =
                     [
                         new ChartSeries { Name = "In use", Data = mem.InUse, Color = accent },
@@ -979,7 +976,6 @@ public sealed class DesktopHost : IRenderHost, IDisposable
                     return new ChartModel
                     {
                         Title = "Disk",
-                        Subtitle = disk.UnavailableReason ?? "counters unavailable",
                         Series = [],
                         AxisMax = 100,
                         ValueText = "--",
@@ -1009,9 +1005,6 @@ public sealed class DesktopHost : IRenderHost, IDisposable
                     return new ChartModel
                     {
                         Title = "Disk",
-                        Subtitle = bytesReason is null
-                            ? (busy > 0 ? $"{busy:0}% active time" : "0% active time")
-                            : $"% Disk Time only - {bytesReason}",
                         Series =
                         [
                             new ChartSeries { Name = "Active time", Data = disk.ActivePercent, Color = new Color4(0.36f, 0.66f, 0.86f, 1f) },
@@ -1028,7 +1021,6 @@ public sealed class DesktopHost : IRenderHost, IDisposable
                 return new ChartModel
                 {
                     Title = "Disk",
-                    Subtitle = busy > 0 ? $"{busy:0}% active time" : "0% active time",
                     Series =
                     [
                         new ChartSeries { Name = "Read", Data = disk.ReadBytes, Color = new Color4(0.36f, 0.66f, 0.86f, 1f) },
@@ -1063,7 +1055,6 @@ public sealed class DesktopHost : IRenderHost, IDisposable
                 return new ChartModel
                 {
                     Title = wireless ? "Wi-Fi" : "Ethernet",
-                    Subtitle = name,
                     Series =
                     [
                         new ChartSeries { Name = "Send", Data = net.SendBytes, Color = new Color4(0.30f, 0.74f, 0.80f, 1f) },
@@ -1086,7 +1077,6 @@ public sealed class DesktopHost : IRenderHost, IDisposable
                     return new ChartModel
                     {
                         Title = "GPU",
-                        Subtitle = gpu.UnsupportedReason ?? "counters unavailable",
                         Series = [],
                         AxisMax = 100,
                         ValueText = "--",
@@ -1117,7 +1107,6 @@ public sealed class DesktopHost : IRenderHost, IDisposable
                 return new ChartModel
                 {
                     Title = "GPU",
-                    Subtitle = string.IsNullOrEmpty(engines) ? "engines" : engines,
                     Series = [new ChartSeries { Name = "GPU", Data = gpu.Utilization, Color = accent, Unit = "%" }],
                     AxisMax = 100,
                     PercentAxis = true,
@@ -1136,7 +1125,6 @@ public sealed class DesktopHost : IRenderHost, IDisposable
                     return new ChartModel
                     {
                         Title = "GPU",
-                        Subtitle = gpu.UnsupportedReason ?? "counters unavailable",
                         Series = [],
                         AxisMax = 100,
                         ValueText = "--",
@@ -1172,7 +1160,6 @@ public sealed class DesktopHost : IRenderHost, IDisposable
                 return new ChartModel
                 {
                     Title = "GPU",
-                    Subtitle = _gpuEngineCount > 0 ? $"{_gpuEngineCount} engine type(s)" : "no engine activity",
                     Series = list,
                     AxisMax = 100,
                     PercentAxis = true,
@@ -1190,7 +1177,6 @@ public sealed class DesktopHost : IRenderHost, IDisposable
                     return new ChartModel
                     {
                         Title = "VRAM",
-                        Subtitle = "",
                         Series = [],
                         AxisMax = 100,
                         ValueText = "--",
@@ -1208,7 +1194,6 @@ public sealed class DesktopHost : IRenderHost, IDisposable
                 return new ChartModel
                 {
                     Title = "VRAM",
-                    Subtitle = "",
                     Series = [new ChartSeries { Name = "VRAM", Data = gpu.DedicatedUsedBytes!, Color = accent }],
                     AxisMax = total,
                     AutoRange = true,
@@ -1225,7 +1210,6 @@ public sealed class DesktopHost : IRenderHost, IDisposable
                     // A saved per-core config that is still waiting for samples must not
                     // be called "GPU": the metric is the card, and per-core is a Cpu view.
                     Title = cfg.Graph == GraphKind.GpuCores ? "CPU" : cfg.Graph.ToString(),
-                    Subtitle = "",
                     Series = [],
                     AxisMax = 100,
                     ValueText = "--",

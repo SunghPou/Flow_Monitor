@@ -15,7 +15,6 @@ public sealed class ResourceCache : IDisposable
     readonly ConcurrentDictionary<string, SizeF> _measureCache = new(StringComparer.Ordinal);
 
     public IDWriteTextFormat Title { get; }
-    public IDWriteTextFormat Subtitle { get; }
     public IDWriteTextFormat HeaderValue { get; }
     public IDWriteTextFormat Axis { get; }
     public IDWriteTextFormat AxisRight { get; }
@@ -37,7 +36,6 @@ public sealed class ResourceCache : IDisposable
         _device = device;
 
         Title = device.CreateTextFormat("Segoe UI Variable Text", 12.5f, FontWeight.SemiBold);
-        Subtitle = device.CreateTextFormat("Segoe UI Variable Text", 11f, FontWeight.Normal);
         HeaderValue = device.CreateTextFormat("Segoe UI Variable Display", 21f, FontWeight.SemiBold,
             hAlign: TextAlignment.Trailing);
         Axis = device.CreateTextFormat("Segoe UI Variable Text", 9.5f, FontWeight.Normal);

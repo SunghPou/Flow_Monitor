@@ -535,7 +535,6 @@ public static class SelfTest
             var emptyModel = new ChartModel
             {
                 Title = "Fans",
-                Subtitle = "",
                 Series = [],
                 AxisMax = 100,
                 ValueText = "--",
@@ -2135,7 +2134,6 @@ public static class SelfTest
         string valueUnit = "%") => new()
     {
         Title = "CPU",
-        Subtitle = "self test",
         Series = [new ChartSeries { Name = "CPU", Data = new TimeSeries(), Color = new Vortice.Mathematics.Color4(0.30f, 0.76f, 1f, 1f), Unit = "%" }],
         AxisMax = axisMax,
         PercentAxis = percent,
@@ -2164,7 +2162,6 @@ public static class SelfTest
         return new ChartModel
         {
             Title = "CPU",
-            Subtitle = $"{count} logical processors",
             Series = list,
             AxisMax = 100,
             PercentAxis = true,
@@ -2185,7 +2182,6 @@ public static class SelfTest
     static ChartModel BuildStackedModel(int w, int h) => new()
     {
         Title = "Memory",
-        Subtitle = "self test",
         Series =
         [
             new ChartSeries { Name = "In use", Data = new TimeSeries(), Color = new Vortice.Mathematics.Color4(0.30f, 0.76f, 1f, 1f) },
@@ -2202,7 +2198,6 @@ public static class SelfTest
     static ChartModel BuildBytesModel(int w, int h) => new()
     {
         Title = "Ethernet",
-        Subtitle = "Intel I225-V",
         Series =
         [
             new ChartSeries { Name = "Send", Data = new TimeSeries(), Color = new Vortice.Mathematics.Color4(0.30f, 0.74f, 0.80f, 1f) },

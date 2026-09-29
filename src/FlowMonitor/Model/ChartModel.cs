@@ -31,7 +31,6 @@ public sealed class ChartSeries
 public sealed class ChartModel
 {
     public required string Title { get; init; }
-    public required string Subtitle { get; init; }
     public required List<ChartSeries> Series { get; init; }
 
     /// <summary>Upper bound of the value axis. Use <see cref="AutoRange"/> for dynamic scaling.</summary>
