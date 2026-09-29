@@ -147,17 +147,60 @@ public static class WidgetPainter
             float tipX = center.X + (prev ? -r : r);
             float backX = center.X + (prev ? r : -r);
             float dir = prev ? 1f : -1f;
+            // Sharp corners catch the eye next to the round badges, so every vertex
+            // gets a parabolic fillet: tangent at both ends, still one filled region.
+            float fillet = 1.2f * s;
+            V2[] pts = [
+                new(tipX, center.Y),
+                new(backX, center.Y - r - k),
+                new(backX, center.Y - r + k),
+                new(tipX + dir * 2f * k, center.Y),
+                new(backX, center.Y + r - k),
+                new(backX, center.Y + r + k),
+            ];
+            float minEdge = float.MaxValue;
+            for (int i = 0; i < 6; i++)
+            {
+                var a = pts[i];
+                var c = pts[(i + 1) % 6];
+                minEdge = Math.Min(minEdge, MathF.Sqrt((c.X - a.X) * (c.X - a.X) + (c.Y - a.Y) * (c.Y - a.Y)));
+            }
+            float f = Math.Min(fillet, minEdge / 2f);
             var ink = res.Brush(new Color4(ArrowInk.R, ArrowInk.G, ArrowInk.B, ArrowInk.A * amount));
             dc.PushAxisAlignedClip(new RectF(0, 0, width, height), AntialiasMode.Aliased);
             var geo = res.D2DFactory.CreatePathGeometry();
             using (var sink = geo.Open())
             {
-                sink.BeginFigure(new V2(tipX, center.Y), FigureBegin.Filled);
-                sink.AddLine(new V2(backX, center.Y - r - k));
-                sink.AddLine(new V2(backX, center.Y - r + k));
-                sink.AddLine(new V2(tipX + dir * 2f * k, center.Y));
-                sink.AddLine(new V2(backX, center.Y + r - k));
-                sink.AddLine(new V2(backX, center.Y + r + k));
+                V2 Unit(V2 from, V2 to)
+                {
+                    float dx = to.X - from.X, dy = to.Y - from.Y;
+                    float len = Math.Max(MathF.Sqrt(dx * dx + dy * dy), 0.0001f);
+                    return new V2(dx / len, dy / len);
+                }
+                V2 Corner(int i, int side)
+                {
+                    var v = pts[i];
+                    if (side == 0) return v;
+                    var o = pts[side < 0 ? (i + 5) % 6 : (i + 1) % 6];
+                    var d = Unit(v, o);
+                    return new V2(v.X + d.X * f, v.Y + d.Y * f);
+                }
+                sink.BeginFigure(Corner(0, -1), FigureBegin.Filled);
+                for (int i = 1; i <= 6; i++)
+                {
+                    int j = i % 6;
+                    // The inner notch stays sharp; every outer corner is rounded.
+                    if (j == 3) sink.AddLine(pts[3]);
+                    else
+                    {
+                        sink.AddLine(Corner(j, -1));
+                        sink.AddQuadraticBezier(new QuadraticBezierSegment
+                        {
+                            Point1 = Corner(j, 0),
+                            Point2 = Corner(j, 1),
+                        });
+                    }
+                }
                 sink.EndFigure(FigureEnd.Closed);
                 sink.Close();
             }
