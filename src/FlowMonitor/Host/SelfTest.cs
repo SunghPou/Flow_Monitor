@@ -1174,11 +1174,21 @@ public static class SelfTest
                         finally { Model.WidgetStore.DirectoryOverride = priorMig; }
 
                         // The app registers its own Start Menu link; ensuring twice is
-                        // idempotent and the link points at this exe.
-                        StartMenuLink.Ensure();
-                        Check(System.IO.File.Exists(StartMenuLink.LinkPath()),
+                        // idempotent and the link points at this exe. A temp folder, so
+                        // test runs never repoint the user's real link.
+                        string linkDir = System.IO.Path.Combine(
+                            System.IO.Path.GetTempPath(), "flowmonitor-selftest-link");
+                        System.IO.Directory.CreateDirectory(linkDir);
+                        string testLink = StartMenuLink.LinkPath(linkDir);
+                        if (System.IO.File.Exists(testLink)) System.IO.File.Delete(testLink);
+                        StartMenuLink.EnsureInto(testLink);
+                        string? linkTarget = ShellLink.ReadTarget(testLink);
+                        string selfExe = Environment.ProcessPath ?? "";
+                        Check(System.IO.File.Exists(testLink)
+                                && string.Equals(linkTarget, selfExe, StringComparison.OrdinalIgnoreCase),
                             "the app leaves a Start Menu link to itself",
-                            StartMenuLink.LinkPath());
+                            linkTarget ?? "(no link written)");
+                        if (System.IO.File.Exists(testLink)) System.IO.File.Delete(testLink);
 
                         // The store is single-rooted: bin-adjacent configs move over once,
                         // and only into an empty local store.

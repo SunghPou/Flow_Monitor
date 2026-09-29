@@ -12,7 +12,9 @@ internal static class StartMenuLink
             ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.StartMenu), "Programs"),
             "FlowMonitor.lnk");
 
-    public static void Ensure()
+    public static void Ensure() => EnsureInto(LinkPath());
+
+    internal static void EnsureInto(string linkPath)
     {
         // The Programs folder is watched by Explorer and the indexer, so the save
         // can lose a sharing race; a few retries beat a missing link.
@@ -22,9 +24,9 @@ internal static class StartMenuLink
             {
                 string exe = Environment.ProcessPath ?? "";
                 if (exe.Length == 0) return;
-                string have = ShellLink.ReadTarget(LinkPath()) ?? "";
+                string have = ShellLink.ReadTarget(linkPath) ?? "";
                 if (string.Equals(have, exe, StringComparison.OrdinalIgnoreCase)) return;
-                ShellLink.Write(LinkPath(), exe, Path.GetDirectoryName(exe) ?? "",
+                ShellLink.Write(linkPath, exe, Path.GetDirectoryName(exe) ?? "",
                     "FlowMonitor desktop widgets");
                 return;
             }
