@@ -35,7 +35,7 @@ internal static class ColorPickerWindow
     static Hsv _hsv;
     static byte _alpha = 255;
     static PickerSpace _space = PickerSpace.Perceptual;
-    static PickerModel _model = PickerModel.Rgb;
+    static PickerModel _model = PickerModel.Hsv;
     static PickerPart _drag = PickerPart.None;
 
     /// <summary>Frame timer cadence: one paint and one live-preview push per refresh.</summary>
@@ -171,7 +171,7 @@ internal static class ColorPickerWindow
         _hsv = Rgba.FromHex(startHex).ToHsv();
         _alpha = Rgba.FromHex(startHex).A;
         _space = PickerSpace.Perceptual;
-        _model = PickerModel.Rgb;
+        _model = PickerModel.Hsv;
 
         host.SetMenuOpen(true);
         try { Run(host, widget, x, y); }
