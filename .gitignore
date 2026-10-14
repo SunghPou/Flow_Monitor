@@ -3,3 +3,4 @@ obj/
 captures/
 *.user
 docs/reference/
+.opencode/
